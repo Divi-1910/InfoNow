@@ -2,10 +2,9 @@ package configs
 
 import (
 	"log"
-	"os"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
 type Config struct {
@@ -20,39 +19,36 @@ type Config struct {
 	HTTPPort string
 }
 
-func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return fallback
-}
+func LoadConfig() *Config {
+	viper.SetConfigFile(".env")
+	viper.SetConfigType("env")
+	viper.AutomaticEnv()
 
-func getRequiredEnv(key string) string {
-	value, exists := os.LookupEnv(key)
-	if !exists || strings.TrimSpace(value) == "" {
-		log.Fatalf("Config error : required key %s is missing in env", key)
-	}
-	return value
-}
+	_ = viper.ReadInConfig()
 
-func New() *Config {
-	intervalSeconds, err := strconv.Atoi(getEnv("SCHEDULE_INTERVAL_SECONDS", "900"))
-	if err != nil {
-		log.Fatalf("Config error : invalid SCHEDULE_INTERVAL_SECONDS value : %v", err)
+	viper.SetDefault("KAFKA_BROKER", "kafka:29092")
+	viper.SetDefault("REDIS_ADDR", "localhost:6379")
+	viper.SetDefault("NEWSAPI_BASE_URL", "https://newsapi.org/v2")
+	viper.SetDefault("GLOBAL_TOPICS", "ai,tech,world,crypto")
+	viper.SetDefault("SCHEDULE_INTERVAL_SECONDS", 900)
+	viper.SetDefault("INGESTOR_HTTP_PORT", "8081")
+
+	if !viper.IsSet("NEWSAPI_KEY") {
+		log.Fatal("MISSING REQUIRED ENV VARIABLE: NEWSAPI_KEY")
 	}
 
-	cfg := &Config{
-		KafkaBroker: getEnv("KAFKA_BROKER", "kafka:29092"),
-		RedisAddr:   getEnv("REDIS_ADDR", "redis:6379"),
+	config := Config{
+		KafkaBroker: viper.GetString("KAFKA_BROKER"),
+		RedisAddr:   viper.GetString("REDIS_ADDR"),
 
-		NewsAPIKey:  getRequiredEnv("NEWS_API_KEY"),
-		NewsBaseURL: getEnv("NEWSAPI_BASE_URL", "https://newsapi.org/v2"),
+		NewsAPIKey:  viper.GetString("NEWSAPI_KEY"),
+		NewsBaseURL: viper.GetString("NEWSAPI_BASE_URL"),
 
-		ScheduleInterval: time.Duration(intervalSeconds) * time.Second,
+		ScheduleInterval: time.Duration(viper.GetInt("SCHEDULE_INTERVAL_SECONDS")) * time.Second,
 
-		HTTPPort: getEnv("HTTP_PORT", "8080"),
+		HTTPPort: viper.GetString("INGESTOR_HTTP_PORT"),
 	}
 
-	return cfg
+	return &config
 
 }
