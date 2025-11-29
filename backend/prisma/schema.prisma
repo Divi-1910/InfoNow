@@ -1,0 +1,57 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            Int            @id @default(autoincrement())
+  email         String         @unique
+  name          String
+  pictureUrl    String
+  userTopics    UserTopic[]
+  userSubTopics UserSubTopic[]
+}
+
+model Topic {
+  id         Int         @id @default(autoincrement())
+  name       String      @unique
+  subTopics  SubTopic[]
+  userTopics UserTopic[]
+}
+
+model SubTopic {
+  id            Int            @id @default(autoincrement())
+  name          String         @unique
+  topic         Topic?         @relation(fields: [topicId], references: [id])
+  topicId       Int?
+  userSubTopics UserSubTopic[]
+}
+
+model UserTopic {
+  id      Int   @id @default(autoincrement())
+  user    User  @relation(fields: [userId], references: [id])
+  userId  Int
+  topic   Topic @relation(fields: [topicId], references: [id])
+  topicId Int
+
+  @@unique([userId, topicId])
+}
+
+model UserSubTopic {
+  id         Int      @id @default(autoincrement())
+  user       User     @relation(fields: [userId], references: [id])
+  userId     Int
+  subTopic   SubTopic @relation(fields: [subTopicId], references: [id])
+  subTopicId Int
+
+  @@unique([userId, subTopicId])
+}

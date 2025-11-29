@@ -1,12 +1,29 @@
-import { motion, useScroll, useTransform } from "framer-motion";
-import { Search, Sparkles, TrendingUp, Bookmark, Bell, User, Menu } from "lucide-react";
-import { useState, useRef } from "react";
+import { motion } from "framer-motion";
+import {
+  Search,
+  Sparkles,
+  TrendingUp,
+  Bookmark,
+  Bell,
+  User,
+  Menu,
+} from "lucide-react";
+import { useState } from "react";
 
 const HomePage = () => {
   const [activeTab, setActiveTab] = useState("feed");
 
-  const topics = ["All", "AI", "Stock Market", "Gaming", "Space", "Cybersecurity", "Politics", "Crypto"];
-  
+  const topics = [
+    "All",
+    "AI",
+    "Stock Market",
+    "Gaming",
+    "Space",
+    "Cybersecurity",
+    "Politics",
+    "Crypto",
+  ];
+
   const feedItems = [
     {
       id: 1,
@@ -14,8 +31,9 @@ const HomePage = () => {
       title: "OpenAI Announces GPT-5 with Revolutionary Reasoning Capabilities",
       source: "TechCrunch",
       time: "2 min ago",
-      image: "https://images.unsplash.com/photo-1677442136019-21780ecad995?w=800&q=80",
-      topic: "AI"
+      image:
+        "https://images.unsplash.com/photo-1677442136019-21780ecad995?w=800&q=80",
+      topic: "AI",
     },
     {
       id: 2,
@@ -23,8 +41,9 @@ const HomePage = () => {
       title: "Discussion: The Future of AI Regulation in Europe",
       source: "r/technology",
       time: "15 min ago",
-      image: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&q=80",
-      topic: "AI"
+      image:
+        "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&q=80",
+      topic: "AI",
     },
     {
       id: 3,
@@ -32,8 +51,9 @@ const HomePage = () => {
       title: "NASA's Artemis Mission: What You Need to Know",
       source: "NASA Official",
       time: "1h ago",
-      image: "https://images.unsplash.com/photo-1446776653964-20c1d3a81b06?w=800&q=80",
-      topic: "Space"
+      image:
+        "https://images.unsplash.com/photo-1446776653964-20c1d3a81b06?w=800&q=80",
+      topic: "Space",
     },
     {
       id: 4,
@@ -41,9 +61,10 @@ const HomePage = () => {
       title: "Bitcoin Surges Past $100K Amid Institutional Adoption",
       source: "Bloomberg",
       time: "2h ago",
-      image: "https://images.unsplash.com/photo-1621761191319-c6fb62004040?w=800&q=80",
-      topic: "Crypto"
-    }
+      image:
+        "https://images.unsplash.com/photo-1621761191319-c6fb62004040?w=800&q=80",
+      topic: "Crypto",
+    },
   ];
 
   return (
@@ -60,25 +81,37 @@ const HomePage = () => {
             <nav className="hidden md:flex gap-6">
               <button
                 onClick={() => setActiveTab("feed")}
-                className={`text-sm font-light transition-colors ${activeTab === "feed" ? "text-white" : "text-gray-500 hover:text-gray-300"}`}
+                className={`text-sm font-light transition-colors ${
+                  activeTab === "feed"
+                    ? "text-white"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
               >
                 Feed
               </button>
               <button
                 onClick={() => setActiveTab("trending")}
-                className={`text-sm font-light transition-colors ${activeTab === "trending" ? "text-white" : "text-gray-500 hover:text-gray-300"}`}
+                className={`text-sm font-light transition-colors ${
+                  activeTab === "trending"
+                    ? "text-white"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
               >
                 Trending
               </button>
               <button
                 onClick={() => setActiveTab("saved")}
-                className={`text-sm font-light transition-colors ${activeTab === "saved" ? "text-white" : "text-gray-500 hover:text-gray-300"}`}
+                className={`text-sm font-light transition-colors ${
+                  activeTab === "saved"
+                    ? "text-white"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
               >
                 Saved
               </button>
             </nav>
           </div>
-          
+
           <div className="flex items-center gap-4">
             <div className="hidden lg:flex items-center gap-2 bg-zinc-900/50 rounded-full px-4 py-2 border border-zinc-800/50">
               <Search className="w-4 h-4 text-gray-500" />
@@ -88,13 +121,22 @@ const HomePage = () => {
                 className="bg-transparent border-none outline-none text-sm font-light w-64 placeholder:text-gray-600"
               />
             </div>
-            <button className="p-2 hover:bg-zinc-900/50 rounded-full transition-colors">
+            <button
+              title="bell"
+              className="p-2 hover:bg-zinc-900/50 rounded-full transition-colors"
+            >
               <Bell className="w-5 h-5" />
             </button>
-            <button className="p-2 hover:bg-zinc-900/50 rounded-full transition-colors">
+            <button
+              title="user"
+              className="p-2 hover:bg-zinc-900/50 rounded-full transition-colors"
+            >
               <User className="w-5 h-5" />
             </button>
-            <button className="md:hidden p-2 hover:bg-zinc-900/50 rounded-full transition-colors">
+            <button
+              title="menu"
+              className="md:hidden p-2 hover:bg-zinc-900/50 rounded-full transition-colors"
+            >
               <Menu className="w-5 h-5" />
             </button>
           </div>
@@ -153,9 +195,13 @@ const HomePage = () => {
                         <span className="text-xs px-2 py-1 bg-zinc-800/50 rounded-full text-gray-400 font-light">
                           {item.topic}
                         </span>
-                        <span className="text-xs text-gray-600 font-light">{item.source}</span>
+                        <span className="text-xs text-gray-600 font-light">
+                          {item.source}
+                        </span>
                         <span className="text-xs text-gray-700">•</span>
-                        <span className="text-xs text-gray-600 font-light">{item.time}</span>
+                        <span className="text-xs text-gray-600 font-light">
+                          {item.time}
+                        </span>
                       </div>
                       <h3 className="text-xl font-light mb-4 group-hover:text-gray-300 transition-colors">
                         {item.title}
@@ -205,10 +251,19 @@ const HomePage = () => {
                 <h3 className="font-light">Trending Now</h3>
               </div>
               <div className="space-y-3">
-                {["OpenAI GPT-5 Launch", "Bitcoin $100K", "NASA Artemis Update", "AI Regulation EU"].map((trend, idx) => (
+                {[
+                  "OpenAI GPT-5 Launch",
+                  "Bitcoin $100K",
+                  "NASA Artemis Update",
+                  "AI Regulation EU",
+                ].map((trend, idx) => (
                   <div key={idx} className="flex items-center gap-2 text-sm">
-                    <span className="text-gray-600 text-xs font-light">{idx + 1}</span>
-                    <span className="text-gray-300 hover:text-white cursor-pointer transition-colors font-light">{trend}</span>
+                    <span className="text-gray-600 text-xs font-light">
+                      {idx + 1}
+                    </span>
+                    <span className="text-gray-300 hover:text-white cursor-pointer transition-colors font-light">
+                      {trend}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -219,11 +274,15 @@ const HomePage = () => {
               <div className="grid grid-cols-2 gap-4 text-center">
                 <div>
                   <div className="text-2xl font-light mb-1">247</div>
-                  <div className="text-xs text-gray-600 font-light">Stories Today</div>
+                  <div className="text-xs text-gray-600 font-light">
+                    Stories Today
+                  </div>
                 </div>
                 <div>
                   <div className="text-2xl font-light mb-1">12</div>
-                  <div className="text-xs text-gray-600 font-light">Saved Items</div>
+                  <div className="text-xs text-gray-600 font-light">
+                    Saved Items
+                  </div>
                 </div>
               </div>
             </div>

@@ -12,6 +12,23 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  pgbouncer:
+    image: edoburu/pgbouncer
+    depends_on:
+      - postgres
+    environment:
+      DB_USER: Divyansh
+      DB_PASSWORD: dabadebadeba
+      DB_HOST: postgres
+      DB_NAME: info_now_db
+      DB_PORT: 5432
+      AUTH_TYPE: md5
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 20
+    ports:
+      - "6432:5432"
+
   redis:
     image: redis:alpine
     container_name: redis-name
@@ -33,19 +50,19 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:29093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_LISTENERS: PLAINTEXT://broker:29092,CONTROLLER://broker:29093,PLAINTEXT_HOST://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9093
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
     volumes:
-      - kafka_data:/tmp/kraft-combined-logs
+      - kafka_data:/var/lib/kafka/data
 
   opensearch:
-    image: opensearchproject/opensearch:2.11.0 # Pin a specific version
+    image: opensearchproject/opensearch:2.11.0
     container_name: os-main
     environment:
       - cluster.name=dev-cluster
@@ -54,7 +71,7 @@ services:
       - bootstrap.memory_lock=true
       - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
       - plugins.security.disabled=true
-      - DISABLE_INSTALL_DEMO_CONFIG=true # Prevents installing demo certs you don't use
+      - DISABLE_INSTALL_DEMO_CONFIG=true
     ports:
       - "9200:9200"
       - "9600:9600"
@@ -67,7 +84,7 @@ services:
         hard: 65536
     volumes:
       - opensearch_data:/usr/share/opensearch/data
-    healthcheck: # Waits for OS to be yellow/green before starting Dashboards
+    healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200/_cat/health || exit 1"]
       interval: 10s
       timeout: 5s

@@ -190,6 +190,7 @@ const WelcomePage = () => {
             >
               {images.map((_, idx) => (
                 <button
+                  title="image"
                   key={idx}
                   onClick={() => setCurrentImage(idx)}
                   className={`h-[2px] transition-all duration-500 ${
@@ -236,7 +237,7 @@ const WelcomePage = () => {
             >
               <div>
                 <h2 className="text-2xl font-light mb-2">Welcome</h2>
-                <p className="text-gray-500 font-light text-sm">
+                <p className="text-white font-light text-sm">
                   Stop searching. Start understanding.
                 </p>
               </div>
@@ -369,7 +370,7 @@ const WelcomePage = () => {
 const AboutSection = () => {
   return (
     <section className="relative min-h-screen bg-zinc-900 flex items-center justify-center py-32 px-6 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-b from-black via-transparent to-zinc-900 z-30 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-b from-zinc-950 via-transparent to-zinc-950 z-30 pointer-events-none" />
       <div className="absolute inset-0 z-0">
         <div className="absolute inset-0 bg-gradient-to-b from-zinc-900 via-transparent to-zinc-900 z-10" />
         <div className="absolute inset-0 gsap-parallax">
@@ -378,7 +379,7 @@ const AboutSection = () => {
             loop
             muted
             playsInline
-            className="w-full h-full object-cover opacity-40"
+            className="w-full h-full object-cover opacity-50"
             src={newsVideo}
           />
         </div>
@@ -386,11 +387,11 @@ const AboutSection = () => {
 
       <div className="relative z-20 max-w-6xl mx-auto">
         <div className="text-center mb-24 gsap-fade-up">
-          <h2 className="text-6xl md:text-8xl font-extralight tracking-tight text-white mb-4">
+          <h2 className="text-6xl md:text-8xl font-sans tracking-tight text-gray-300 mb-4">
             Stop searching.
           </h2>
           <h2 className="text-6xl md:text-8xl font-extralight tracking-tight mb-16">
-            <span className="text-gray-500">Start</span>{" "}
+            <span className="text-gray-300">Start</span>{" "}
             <span className="text-white">understanding.</span>
           </h2>
           <div className="h-[1px] w-32 bg-gradient-to-r from-transparent via-white/40 to-transparent mx-auto" />
@@ -429,7 +430,7 @@ const AboutSection = () => {
           ].map((item, i) => (
             <div
               key={i}
-              className="gsap-scale group relative bg-white/[0.03] backdrop-blur-sm border border-white/10 rounded-3xl p-10 hover:bg-white/[0.06] hover:border-white/20 transition-all duration-500 cursor-pointer"
+              className="gsap-scale group relative bg-white/[0.1] backdrop-blur-sm border border-white/10 rounded-3xl p-10 hover:bg-white/[0.05] hover:border-white/20 transition-all duration-500 cursor-pointer"
             >
               <div className="text-6xl font-extralight text-white/20 mb-6 group-hover:text-white/30 transition-colors">
                 {item.num}
@@ -511,7 +512,7 @@ const PhilosophySection = ({
       id={id}
       className="relative h-[150vh] flex items-center justify-center overflow-hidden bg-zinc-900"
     >
-      <div className="absolute inset-0 bg-gradient-to-b from-zinc-900 via-transparent to-zinc-900 z-30 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-b from-zinc-950 via-transparent to-zinc-950 z-30 pointer-events-none" />
       <motion.div
         className="absolute inset-0 z-0"
         style={{ scale: imageScale, opacity: imageOpacity, y: imageY }}
@@ -525,7 +526,7 @@ const PhilosophySection = ({
         />
       </motion.div>
 
-      <div className="relative z-20 max-w-5xl mx-auto px-6 text-center sticky top-1/2 -translate-y-1/2">
+      <div className="z-20 max-w-5xl mx-auto px-6 text-center sticky top-1/2 -translate-y-1/2">
         <motion.div
           style={{ opacity: wordOpacity, scale: wordScale }}
           className="mb-16"
@@ -580,9 +581,9 @@ const FinalCTASection = () => {
   return (
     <section
       ref={sectionRef}
-      className="relative z-50 h-screen bg-zinc-900 flex items-center justify-center px-6 overflow-hidden"
+      className="relative z-50 h-screen bg-zinc-950 flex items-center justify-center px-6 overflow-hidden"
     >
-      <div className="absolute inset-0 bg-gradient-to-b from-zinc-900 via-transparent to-zinc-900 z-30 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-b from-zinc-950 via-transparent to-zinc-900 z-30 pointer-events-none" />
       <motion.div
         className="absolute inset-0 z-0"
         style={{ opacity: bgOpacity, scale: bgScale, y: bgY }}
