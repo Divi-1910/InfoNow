@@ -4,13 +4,14 @@ import {
   useScroll,
   useTransform,
 } from "framer-motion";
-import { GoogleLogin } from "@react-oauth/google";
+import { GoogleLogin, type CredentialResponse } from "@react-oauth/google";
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { Sparkles, TrendingUp, Zap, ChevronDown } from "lucide-react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import newsVideo from "../assets/news_network.mp4";
+import { handleGoogleLoginSuccess } from "../api/auth";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -90,9 +91,10 @@ const WelcomePage = () => {
     return () => ctx.revert();
   }, []);
 
-  const handleLoginSuccess = (credentialResponse: any) => {
-    console.log("Login Success:", credentialResponse);
-    navigate("/home");
+  const handleLoginSuccess = async (credentialResponse: CredentialResponse) => {
+    const data = await handleGoogleLoginSuccess(credentialResponse);
+    console.log("Google Login Success:", data.message);
+    navigate(data.redirect);
   };
 
   const handleLoginError = () => {

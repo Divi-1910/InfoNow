@@ -22,8 +22,8 @@ services:
       DB_HOST: postgres
       DB_NAME: info_now_db
       DB_PORT: 5432
-      AUTH_TYPE: md5
-      POOL_MODE: transaction
+      AUTH_TYPE: plain
+      POOL_MODE: session
       MAX_CLIENT_CONN: 1000
       DEFAULT_POOL_SIZE: 20
     ports:

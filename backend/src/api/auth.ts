@@ -3,6 +3,13 @@ import type { Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { OAuth2Client } from "google-auth-library";
 import { prisma } from "../lib/prisma";
+import {
+  generateAccessToken,
+  generateRefreshToken,
+  storeRefreshToken,
+  verifyRefreshToken,
+  deleteRefreshToken,
+} from "../utils/jwt.js";
 
 const authRouter = Router();
 
@@ -40,10 +47,6 @@ authRouter.post("/google-login", async (req: Request, res: Response) => {
       throw new Error("No user payload found in the google token");
     }
 
-    if (userPayload["iss"] != "accounts.google.com") {
-      throw new Error("Invalid Issuer");
-    }
-
     const userId = userPayload["sub"];
     const email = userPayload["email"];
     const name = userPayload["name"];
@@ -53,31 +56,81 @@ authRouter.post("/google-login", async (req: Request, res: Response) => {
 
     const user = await prisma.user.findUnique({
       where: {
-        email,
+        email: email!,
       },
       include: {
-        topics: true,
-        subTopics: true,
+        userTopics: true,
+        userSubTopics: true,
       },
     });
 
     if (!user) {
       const newUser = await prisma.user.create({
         data: {
-          email,
-          name,
-          pictureUrl,
+          email: email!,
+          name: name!,
+          pictureUrl: pictureUrl!,
         },
       });
 
       logger.info(`Created new user : ${newUser.email}`);
+
+      const accessToken = generateAccessToken({
+        userId: newUser.id,
+        email: newUser.email,
+      });
+      const refreshToken = generateRefreshToken({
+        userId: newUser.id,
+        email: newUser.email,
+      });
+      await storeRefreshToken(newUser.id, refreshToken);
+
+      res.cookie("accessToken", accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 15 * 60 * 1000, // 15 minutes
+      });
+
+      res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      });
+
       return res.status(200).json({
         message: "User created successfully",
         user: newUser,
-        redirect: "/preferences",
+        redirect: "/profile",
       });
     } else {
       logger.info(`User already exists : ${user.email}`);
+
+      const accessToken = generateAccessToken({
+        userId: user.id,
+        email: user.email,
+      });
+      const refreshToken = generateRefreshToken({
+        userId: user.id,
+        email: user.email,
+      });
+      await storeRefreshToken(user.id, refreshToken);
+
+      res.cookie("accessToken", accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 15 * 60 * 1000,
+      });
+
+      res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+
       return res.status(200).json({
         message: "User Already Exists",
         user: user,
@@ -90,6 +143,67 @@ authRouter.post("/google-login", async (req: Request, res: Response) => {
       message: "Authentication failed",
       error: error instanceof Error ? error.message : "Unknown error",
     });
+  }
+});
+
+authRouter.post("/refresh", async (req: Request, res: Response) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+
+    if (!refreshToken) {
+      return res
+        .status(401)
+        .json({ message: "Refresh token not found", redirect: "/" });
+    }
+
+    const payload = verifyRefreshToken(refreshToken);
+
+    const tokenExists = await prisma.refreshToken.findUnique({
+      where: { token: refreshToken },
+    });
+
+    if (!tokenExists) {
+      return res
+        .status(401)
+        .json({ message: "Invalid refresh token", redirect: "/" });
+    }
+
+    const newAccessToken = generateAccessToken({
+      userId: payload.userId,
+      email: payload.email,
+    });
+
+    res.cookie("accessToken", newAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 15 * 60 * 1000,
+    });
+
+    return res.status(200).json({ message: "Token refreshed" });
+  } catch (error) {
+    logger.error("Refresh token error:", error);
+    return res
+      .status(401)
+      .json({ message: "Invalid refresh token", redirect: "/" });
+  }
+});
+
+authRouter.post("/logout", async (req: Request, res: Response) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+
+    if (refreshToken) {
+      await deleteRefreshToken(refreshToken);
+    }
+
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
+
+    return res.status(200).json({ message: "Logged out successfully" });
+  } catch (error) {
+    logger.error("Logout error:", error);
+    return res.status(500).json({ message: "Logout failed" });
   }
 });
 
