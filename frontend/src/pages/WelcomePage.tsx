@@ -12,11 +12,14 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import newsVideo from "../assets/news_network.mp4";
 import { handleGoogleLoginSuccess } from "../api/auth";
+import { useSetAtom } from "jotai";
+import { userAtom } from "../store/userAtom";
 
 gsap.registerPlugin(ScrollTrigger);
 
 const WelcomePage = () => {
   const navigate = useNavigate();
+  const setUser = useSetAtom(userAtom);
   const [currentImage, setCurrentImage] = useState(0);
   const heroRef = useRef<HTMLDivElement>(null);
 
@@ -94,6 +97,7 @@ const WelcomePage = () => {
   const handleLoginSuccess = async (credentialResponse: CredentialResponse) => {
     const data = await handleGoogleLoginSuccess(credentialResponse);
     console.log("Google Login Success:", data.message);
+    setUser(data.user);
     navigate(data.redirect);
   };
 
@@ -372,7 +376,7 @@ const WelcomePage = () => {
 const AboutSection = () => {
   return (
     <section className="relative min-h-screen bg-zinc-900 flex items-center justify-center py-32 px-6 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-b from-zinc-950 via-transparent to-zinc-950 z-30 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-b from-zinc-800S via-transparent to-zinc-950 z-30 pointer-events-none" />
       <div className="absolute inset-0 z-0">
         <div className="absolute inset-0 bg-gradient-to-b from-zinc-900 via-transparent to-zinc-900 z-10" />
         <div className="absolute inset-0 gsap-parallax">

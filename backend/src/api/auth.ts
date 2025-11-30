@@ -102,7 +102,7 @@ authRouter.post("/google-login", async (req: Request, res: Response) => {
       return res.status(200).json({
         message: "User created successfully",
         user: newUser,
-        redirect: "/profile",
+        redirect: "/home?modal=preferences",
       });
     } else {
       logger.info(`User already exists : ${user.email}`);

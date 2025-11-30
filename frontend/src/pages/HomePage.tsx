@@ -8,10 +8,31 @@ import {
   User,
   Menu,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useAtom } from "jotai";
+import { useSearchParams } from "react-router-dom";
+import { userAtom } from "../store/userAtom";
+import UserProfileDropdown from "../components/UserProfileDropdown";
+import PreferencesModal from "../components/PreferencesModal";
 
 const HomePage = () => {
   const [activeTab, setActiveTab] = useState("feed");
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const [user] = useAtom(userAtom);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams.get("modal") === "preferences") {
+      setIsPreferencesOpen(true);
+    }
+  }, [searchParams]);
+
+  const handleClosePreferences = () => {
+    setIsPreferencesOpen(false);
+    searchParams.delete("modal");
+    setSearchParams(searchParams);
+  };
 
   const topics = [
     "All",
@@ -127,12 +148,27 @@ const HomePage = () => {
             >
               <Bell className="w-5 h-5" />
             </button>
-            <button
-              title="user"
-              className="p-2 hover:bg-zinc-900/50 rounded-full transition-colors"
-            >
-              <User className="w-5 h-5" />
-            </button>
+            <div className="relative">
+              <button
+                title="user"
+                onClick={() => setIsProfileOpen(!isProfileOpen)}
+                className="p-2 hover:bg-zinc-900/50 rounded-full transition-colors"
+              >
+                {user?.pictureUrl ? (
+                  <img
+                    src={user.pictureUrl}
+                    alt={user.name}
+                    className="w-8 h-8 rounded-full"
+                  />
+                ) : (
+                  <User className="w-5 h-5" />
+                )}
+              </button>
+              <UserProfileDropdown
+                isOpen={isProfileOpen}
+                onClose={() => setIsProfileOpen(false)}
+              />
+            </div>
             <button
               title="menu"
               className="md:hidden p-2 hover:bg-zinc-900/50 rounded-full transition-colors"
@@ -289,6 +325,8 @@ const HomePage = () => {
           </motion.aside>
         </div>
       </div>
+
+      <PreferencesModal isOpen={isPreferencesOpen} onClose={handleClosePreferences} />
     </div>
   );
 };

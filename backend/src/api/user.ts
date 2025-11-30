@@ -29,4 +29,24 @@ userRouter.get("/me", async (req: AuthRequest, res: Response) => {
   }
 });
 
+userRouter.put("/profile", async (req: AuthRequest, res: Response) => {
+  try {
+    const { name } = req.body;
+
+    if (!name || name.trim().length === 0) {
+      return res.status(400).json({ message: "Name is required" });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user!.userId },
+      data: { name: name.trim() },
+    });
+
+    return res.status(200).json({ user: updatedUser });
+  } catch (error) {
+    logger.error("Update profile error:", error);
+    return res.status(500).json({ message: "Failed to update profile" });
+  }
+});
+
 export default userRouter;

@@ -37,6 +37,7 @@ model RefreshToken {
 model Topic {
   id         Int         @id @default(autoincrement())
   name       String      @unique
+  slug       String      @unique
   subTopics  SubTopic[]
   userTopics UserTopic[]
 }
@@ -44,6 +45,7 @@ model Topic {
 model SubTopic {
   id            Int            @id @default(autoincrement())
   name          String         @unique
+  slug          String         @unique
   topic         Topic?         @relation(fields: [topicId], references: [id])
   topicId       Int?
   userSubTopics UserSubTopic[]
