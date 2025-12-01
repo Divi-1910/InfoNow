@@ -1,35 +1,21 @@
-import axios from "axios";
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+import axiosInstance from "../lib/axios";
 
 export const getAllTopics = async () => {
-  const response = await axios.get(`${BACKEND_URL}/api/topics/all-topics`, {
-    withCredentials: true,
-  });
+  const response = await axiosInstance.get("/api/topics/all-topics");
   return response.data.topics;
 };
 
 export const saveUserTopics = async (topicIds: number[]) => {
-  const response = await axios.post(
-    `${BACKEND_URL}/api/topics/user-topics`,
-    { topicIds },
-    { withCredentials: true }
-  );
+  const response = await axiosInstance.post("/api/topics/user-topics", { topicIds });
   return response.data;
 };
 
 export const saveUserSubTopics = async (subTopicIds: number[]) => {
-  const response = await axios.post(
-    `${BACKEND_URL}/api/topics/user-subtopics`,
-    { subTopicIds },
-    { withCredentials: true }
-  );
+  const response = await axiosInstance.post("/api/topics/user-subtopics", { subTopicIds });
   return response.data;
 };
 
 export const getUserPreferences = async () => {
-  const response = await axios.get(`${BACKEND_URL}/api/topics/user-preferences`, {
-    withCredentials: true,
-  });
+  const response = await axiosInstance.get("/api/topics/user-preferences");
   return response.data;
 };

@@ -12,6 +12,7 @@ import { useState, useEffect } from "react";
 import { useAtom } from "jotai";
 import { useSearchParams } from "react-router-dom";
 import { userAtom } from "../store/userAtom";
+import { getUserPreferences } from "../api/topics";
 import UserProfileDropdown from "../components/UserProfileDropdown";
 import PreferencesModal from "../components/PreferencesModal";
 
@@ -21,6 +22,8 @@ const HomePage = () => {
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
   const [user] = useAtom(userAtom);
   const [searchParams, setSearchParams] = useSearchParams();
+  const [userTopics, setUserTopics] = useState<any[]>([]);
+  const [selectedTopic, setSelectedTopic] = useState<string>("All");
 
   useEffect(() => {
     if (searchParams.get("modal") === "preferences") {
@@ -28,22 +31,19 @@ const HomePage = () => {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    getUserPreferences().then((data) => {
+      setUserTopics(data.topics);
+    });
+  }, []);
+
   const handleClosePreferences = () => {
     setIsPreferencesOpen(false);
     searchParams.delete("modal");
     setSearchParams(searchParams);
   };
 
-  const topics = [
-    "All",
-    "AI",
-    "Stock Market",
-    "Gaming",
-    "Space",
-    "Cybersecurity",
-    "Politics",
-    "Crypto",
-  ];
+  const topics = ["All", ...userTopics.map((t) => t.name)];
 
   const feedItems = [
     {
@@ -191,17 +191,20 @@ const HomePage = () => {
               transition={{ delay: 0.1 }}
               className="flex gap-2 mb-8 overflow-x-auto pb-2 scrollbar-hide"
             >
-              {topics.map((topic, idx) => (
-                <button
+              {topics.map((topic) => (
+                <motion.button
                   key={topic}
+                  onClick={() => setSelectedTopic(topic)}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   className={`px-4 py-2 rounded-full text-sm font-light whitespace-nowrap transition-all ${
-                    idx === 0
+                    selectedTopic === topic
                       ? "bg-white text-black hover:bg-gray-100"
                       : "bg-zinc-900/50 text-gray-400 hover:bg-zinc-800/50 hover:text-white border border-zinc-800/50"
                   }`}
                 >
                   {topic}
-                </button>
+                </motion.button>
               ))}
             </motion.div>
 
@@ -243,10 +246,6 @@ const HomePage = () => {
                         {item.title}
                       </h3>
                       <div className="flex items-center gap-4">
-                        <button className="text-sm text-gray-500 hover:text-white transition-colors flex items-center gap-1 font-light">
-                          <Sparkles className="w-4 h-4" />
-                          Ask AI
-                        </button>
                         <button className="text-sm text-gray-500 hover:text-white transition-colors flex items-center gap-1 font-light">
                           <Bookmark className="w-4 h-4" />
                           Save
@@ -326,7 +325,10 @@ const HomePage = () => {
         </div>
       </div>
 
-      <PreferencesModal isOpen={isPreferencesOpen} onClose={handleClosePreferences} />
+      <PreferencesModal
+        isOpen={isPreferencesOpen}
+        onClose={handleClosePreferences}
+      />
     </div>
   );
 };
