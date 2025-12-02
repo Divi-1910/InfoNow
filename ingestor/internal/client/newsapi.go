@@ -38,6 +38,23 @@ type NewsAPIClient struct {
 	http    *http.Client
 }
 
+type MultiNewsClient struct {
+	clients []*NewsAPIClient
+	mu      sync.Mutex
+	index   int
+}
+
+func NewMultiNewsClient(apiKey1, apiKey2, apiKey3 string) *MultiNewsClient {
+
+	return &MultiNewsClient{
+		clients: []*NewsAPIClient{
+			NewNewsAPIClient("https://newsapi.org/v2", apiKey1),
+			NewNewsAPIClient("https://newsapi.org/v2", apiKey2),
+			NewNewsAPIClient("https://newsapi.org/v2", apiKey3),
+		},
+	}
+}
+
 func NewNewsAPIClient(baseURL, apiKey string) *NewsAPIClient {
 	return &NewsAPIClient{
 		BaseURL: baseURL,
@@ -49,6 +66,14 @@ func NewNewsAPIClient(baseURL, apiKey string) *NewsAPIClient {
 			Timeout: 10 * time.Second,
 		},
 	}
+}
+
+func (client *MultiNewsClient) GetArticles(ctx context.Context, query string) []Article {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	// round robin
+	client.index = (client.index + 1) % len(client.clients)
+	return client.clients[client.index].GetAllArticles(ctx, query)
 }
 
 func (client *NewsAPIClient) GetAllArticles(ctx context.Context, query string) []Article {

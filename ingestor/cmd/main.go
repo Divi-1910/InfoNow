@@ -14,7 +14,7 @@ func main() {
 
 	config := config.LoadConfig()
 
-	newsClient := client.NewNewsAPIClient("https://newsapi.org/v2", config.NewsAPIKey)
+	multiNewsClient := client.NewMultiNewsClient(config.NewsAPIKey1, config.NewsAPIKey2, config.NewsAPIKey3)
 
 	pgDriver := db.NewDBDriver(config.PooledDBUrl, 25, 25, 5*time.Minute)
 	defer pgDriver.Close()
@@ -32,7 +32,7 @@ func main() {
 		subtopics := topic.SubTopics
 
 		for _, subtopic := range subtopics {
-			articles := newsClient.GetAllArticles(ctx, subtopic.SubTopicSlug)
+			articles := multiNewsClient.GetArticles(ctx, subtopic.SubTopicSlug)
 			Articles = append(Articles, articles...)
 		}
 
