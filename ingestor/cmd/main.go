@@ -18,7 +18,7 @@ func main() {
 
 	Articles := newsClient.GetAllArticles(ctx, "AI-Biology")
 
-	log.Println(len(*Articles))
+	log.Println(len(Articles))
 
 	log.Println("Ingestor finished ... ")
 

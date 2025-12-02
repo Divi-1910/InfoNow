@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -51,22 +51,31 @@ func NewNewsAPIClient(baseURL, apiKey string) *NewsAPIClient {
 	}
 }
 
-func (client *NewsAPIClient) GetAllArticles(ctx context.Context, query string) *[]Article {
+func (client *NewsAPIClient) GetAllArticles(ctx context.Context, query string) []Article {
 	var Articles []Article
 
+	var mu sync.Mutex
 	keywords := strings.Split(query, "-")
 
+	var wg sync.WaitGroup
+
 	for _, keyword := range keywords {
-		keyword = strings.TrimSpace(keyword)
-		log.Println(keyword)
-		result, err := client.GetEverythingRelevant(ctx, keyword)
-		if err != nil {
-			continue
-		}
-		Articles = append(Articles, result.Articles...)
+		wg.Add(1)
+		go func(kw string) {
+			defer wg.Done()
+			kw = strings.TrimSpace(kw)
+			result, err := client.GetEverythingRelevant(ctx, kw)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			Articles = append(Articles, result.Articles...)
+			mu.Unlock()
+		}(keyword)
 	}
 
-	return &Articles
+	wg.Wait()
+	return Articles
 
 }
 
