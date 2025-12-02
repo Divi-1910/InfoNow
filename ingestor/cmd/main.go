@@ -35,8 +35,12 @@ func main() {
 	}
 
 	// Articles := newsClient.GetAllArticles(ctx, "AI-Biology")
-
-	log.Println(len(Articles))
+	log.Println()
+	log.Println()
+	log.Println(Articles)
+	for _, article := range Articles {
+		log.Println(article.Title)
+	}
 
 	log.Println("Ingestor finished ... ")
 

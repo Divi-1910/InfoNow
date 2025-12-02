@@ -52,8 +52,7 @@ func (db *DBDriver) Close() {
 }
 
 func (db *DBDriver) GetAllTopicsAndSubTopics() ([]Topic, error) {
-	selectQuery := `select t.id as topic_id, t."name"  as topic_name, t.slug as topic_slug ,st.id as subtopic_id , st."name" as subtopic_name,  st.slug as subtopic_slug   from "Topic" t  left join "SubTopic" st on t.id = st."topicId" order by topic_id 
-`
+	selectQuery := `select t.id as topic_id, t."name"  as topic_name, t.slug as topic_slug ,st.id as subtopic_id , st."name" as subtopic_name,  st.slug as subtopic_slug   from "Topic" t  left join "SubTopic" st on t.id = st."topicId" limit 25`
 
 	var topics []Topic
 	rows, err := db.Instance.Query(selectQuery)
