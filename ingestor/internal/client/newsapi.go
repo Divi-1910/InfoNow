@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"ingestor/internal/db"
 	"io"
 	"net/http"
 	"net/url"
@@ -40,8 +41,6 @@ type NewsAPIClient struct {
 
 type MultiNewsClient struct {
 	clients []*NewsAPIClient
-	mu      sync.Mutex
-	index   int
 }
 
 func NewMultiNewsClient(apiKey1, apiKey2, apiKey3 string) *MultiNewsClient {
@@ -68,14 +67,37 @@ func NewNewsAPIClient(baseURL, apiKey string) *NewsAPIClient {
 	}
 }
 
-func (client *MultiNewsClient) GetArticles(ctx context.Context, query string) []Article {
-	client.mu.Lock()
-	// round robin
-	client.index = (client.index + 1) % len(client.clients)
-	selectedClient := client.clients[client.index]
-	client.mu.Unlock()
+func (client *MultiNewsClient) GetArticles(ctx context.Context, subtopics []db.SubTopic) []Article {
+	var articles []Article
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
-	return selectedClient.GetAllArticles(ctx, query)
+	jobChan := make(chan db.SubTopic, len(subtopics))
+
+	for _, subtopic := range subtopics {
+		jobChan <- subtopic
+	}
+	close(jobChan)
+
+	for _, client := range client.clients {
+		wg.Add(1)
+		go func(client *NewsAPIClient) {
+			defer wg.Done()
+			for subtopic := range jobChan {
+				newArticles := client.GetAllArticles(ctx, subtopic.SubTopicSlug)
+
+				if len(newArticles) > 0 {
+					mu.Lock()
+					articles = append(articles, newArticles...)
+					mu.Unlock()
+				}
+			}
+		}(client)
+	}
+
+	wg.Wait()
+	return articles
+
 }
 
 func (client *NewsAPIClient) GetAllArticles(ctx context.Context, query string) []Article {

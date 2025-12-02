@@ -30,12 +30,8 @@ func main() {
 
 	for _, topic := range topics {
 		subtopics := topic.SubTopics
-
-		for _, subtopic := range subtopics {
-			articles := multiNewsClient.GetArticles(ctx, subtopic.SubTopicSlug)
-			Articles = append(Articles, articles...)
-		}
-
+		articles := multiNewsClient.GetArticles(ctx, subtopics)
+		Articles = append(Articles, articles...)
 	}
 
 	// Articles := newsClient.GetAllArticles(ctx, "AI-Biology")
