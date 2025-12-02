@@ -65,6 +65,7 @@ func (client *NewsAPIClient) GetAllArticles(ctx context.Context, query string) [
 			defer wg.Done()
 			kw = strings.TrimSpace(kw)
 			result, err := client.GetEverythingRelevant(ctx, kw)
+			time.Sleep(1 * time.Second)
 			if err != nil {
 				return
 			}

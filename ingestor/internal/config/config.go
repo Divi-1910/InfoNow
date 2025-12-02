@@ -36,8 +36,8 @@ func LoadConfig() *Config {
 
 	config := &Config{
 		NewsAPIKey:        viper.GetString("NEWSAPI_KEY"),
-		DirectDBUrl:       viper.GetString("DIRECT_DB_URL"),
-		PooledDBUrl:       viper.GetString("POOLED_DB_URL"),
+		DirectDBUrl:       viper.GetString("DIRECT_DATABASE_URL"),
+		PooledDBUrl:       viper.GetString("POOLED_DATABASE_URL"),
 		ScheduledInterval: viper.GetDuration("SCHEDULED_INTERVAL_IN_HOURS") * time.Hour,
 		ServerPort:        viper.GetString("INGESTOR_PORT"),
 	}
