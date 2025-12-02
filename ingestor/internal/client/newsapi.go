@@ -70,39 +70,24 @@ func NewNewsAPIClient(baseURL, apiKey string) *NewsAPIClient {
 
 func (client *MultiNewsClient) GetArticles(ctx context.Context, query string) []Article {
 	client.mu.Lock()
-	defer client.mu.Unlock()
 	// round robin
 	client.index = (client.index + 1) % len(client.clients)
-	return client.clients[client.index].GetAllArticles(ctx, query)
+	selectedClient := client.clients[client.index]
+	client.mu.Unlock()
+
+	return selectedClient.GetAllArticles(ctx, query)
 }
 
 func (client *NewsAPIClient) GetAllArticles(ctx context.Context, query string) []Article {
-	var Articles []Article
+	searchQuery := strings.ReplaceAll(query, "-", " ")
 
-	var mu sync.Mutex
-	keywords := strings.Split(query, "-")
-
-	var wg sync.WaitGroup
-
-	for _, keyword := range keywords {
-		wg.Add(1)
-		go func(kw string) {
-			defer wg.Done()
-			kw = strings.TrimSpace(kw)
-			result, err := client.GetEverythingRelevant(ctx, kw)
-			time.Sleep(1 * time.Second)
-			if err != nil {
-				return
-			}
-			mu.Lock()
-			Articles = append(Articles, result.Articles...)
-			mu.Unlock()
-		}(keyword)
+	response, err := client.GetEverythingRelevant(ctx, searchQuery)
+	if err != nil {
+		fmt.Printf("Error fetching for %s : %v", searchQuery, err)
+		return []Article{}
 	}
 
-	wg.Wait()
-	return Articles
-
+	return response.Articles
 }
 
 func (client *NewsAPIClient) GetEverythingRelevant(ctx context.Context, query string) (*NewsResponse, error) {
