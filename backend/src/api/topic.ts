@@ -70,32 +70,37 @@ topicRouter.post("/user-subtopics", async (req: AuthRequest, res: Response) => {
       data: subTopicIds.map((subTopicId: number) => ({ userId, subTopicId })),
     });
 
-    return res.status(200).json({ message: "Subtopics updated", userSubTopics });
+    return res
+      .status(200)
+      .json({ message: "Subtopics updated", userSubTopics });
   } catch (error) {
     logger.error("Update user subtopics error:", error);
     return res.status(500).json({ message: "Failed to update subtopics" });
   }
 });
 
-topicRouter.get("/user-preferences", async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.user!.userId;
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        userTopics: { include: { topic: true } },
-        userSubTopics: { include: { subTopic: true } },
-      },
-    });
+topicRouter.get(
+  "/user-preferences",
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          userTopics: { include: { topic: true } },
+          userSubTopics: { include: { subTopic: true } },
+        },
+      });
 
-    return res.status(200).json({
-      topics: user?.userTopics.map((ut) => ut.topic) || [],
-      subtopics: user?.userSubTopics.map((ust) => ust.subTopic) || [],
-    });
-  } catch (error) {
-    logger.error("Get user preferences error:", error);
-    return res.status(500).json({ message: "Failed to fetch preferences" });
+      return res.status(200).json({
+        topics: user?.userTopics.map((ut) => ut.topic) || [],
+        subtopics: user?.userSubTopics.map((ust) => ust.subTopic) || [],
+      });
+    } catch (error) {
+      logger.error("Get user preferences error:", error);
+      return res.status(500).json({ message: "Failed to fetch preferences" });
+    }
   }
-});
+);
 
 export default topicRouter;

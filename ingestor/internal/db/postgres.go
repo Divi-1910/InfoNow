@@ -51,12 +51,77 @@ func (db *DBDriver) Close() {
 	db.Instance.Close()
 }
 
+func (db *DBDriver) GetAllTopicIDs() ([]int, error) {
+	selectQuery := `select t.id from "Topic" t`
+
+	rows, err := db.Instance.Query(selectQuery)
+	if err != nil {
+		log.Printf("Error Executing the Query : %v", err)
+		return nil, fmt.Errorf("error executing the query: %v", err)
+	}
+	defer rows.Close()
+
+	var topicIDs []int
+
+	for rows.Next() {
+		var topicID int
+		err := rows.Scan(&topicID)
+		if err != nil {
+			return nil, fmt.Errorf("error executing query : %v", err)
+		}
+		topicIDs = append(topicIDs, topicID)
+	}
+
+	return topicIDs, nil
+}
+
+func (db *DBDriver) GetTopicById(topicId int) (Topic, error) {
+	topicQuery := `select t.id , t."name", t.slug from "Topic" t where t.id = $1`
+	var currentTopic Topic
+
+	row := db.Instance.QueryRow(topicQuery, topicId).Scan(&currentTopic.TopicID, &currentTopic.TopicName, &currentTopic.TopicSlug)
+	if row != nil {
+		log.Printf("Error Executing the Query : %v", row)
+		return Topic{}, fmt.Errorf("error executing the query: %v", row)
+	}
+
+	subtopicQuery := `select st.id , st."name" , st.slug from "SubTopic" st where st."topicId"  = $1`
+	rows, err := db.Instance.Query(subtopicQuery, topicId)
+	if err != nil {
+		log.Printf("Error Executing the Query : %v", err)
+		return Topic{}, fmt.Errorf("error executing the query: %v", err)
+	}
+
+	var subtopic []SubTopic
+	for rows.Next() {
+		var subtopicID int
+		var subtopicName string
+		var subtopicSlug string
+		err := rows.Scan(&subtopicID, &subtopicName, &subtopicSlug)
+		if err != nil {
+			log.Printf("Error Scanning the Rows : %v", err)
+			return Topic{}, fmt.Errorf("error scanning the rows: %v", err)
+		}
+		subtopic = append(subtopic, SubTopic{
+			SubTopicID:   subtopicID,
+			SubTopicName: subtopicName,
+			SubTopicSlug: subtopicSlug,
+		})
+	}
+
+	currentTopic.SubTopics = subtopic
+
+	return currentTopic, nil
+
+}
+
 func (db *DBDriver) GetAllTopicsAndSubTopics() ([]Topic, error) {
 	selectQuery := `select t.id as topic_id, t."name"  as topic_name, t.slug as topic_slug ,st.id as subtopic_id , st."name" as subtopic_name,  st.slug as subtopic_slug   from "Topic" t  left join "SubTopic" st on t.id = st."topicId" limit 25`
 
 	rows, err := db.Instance.Query(selectQuery)
 	if err != nil {
-		log.Fatalf("Error Executing the Query : %v", err)
+		log.Printf("Error Executing the Query : %v", err)
+		return nil, fmt.Errorf("error executing the query: %v", err)
 	}
 	defer rows.Close()
 
@@ -72,7 +137,8 @@ func (db *DBDriver) GetAllTopicsAndSubTopics() ([]Topic, error) {
 
 		err := rows.Scan(&topicID, &topicName, &topicSlug, &subTopicID, &subTopicName, &subTopicSlug)
 		if err != nil {
-			log.Fatalf("Error Scanning the Rows : %v", err)
+			log.Printf("Error Scanning the Rows : %v", err)
+			return nil, fmt.Errorf("error scanning the rows: %v", err)
 		}
 
 		currentTopic, exists := topicsMap[topicID]
