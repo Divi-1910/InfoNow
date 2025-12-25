@@ -15,6 +15,7 @@ type Config struct {
 	PooledDBUrl       string
 	ScheduledInterval time.Duration
 	ServerPort        string
+	BackendURL        string
 }
 
 func LoadConfig() *Config {
@@ -45,6 +46,10 @@ func LoadConfig() *Config {
 		log.Fatal("POOLED DATABASE URL MISSING")
 	}
 
+	if !viper.IsSet("BACKEND_URL") {
+		log.Fatal("BACKEND URL MISSING")
+	}
+
 	config := &Config{
 		NewsAPIKey1:       viper.GetString("NEWSAPI_KEY_1"),
 		NewsAPIKey2:       viper.GetString("NEWSAPI_KEY_2"),
@@ -53,6 +58,7 @@ func LoadConfig() *Config {
 		PooledDBUrl:       viper.GetString("POOLED_DATABASE_URL"),
 		ScheduledInterval: viper.GetDuration("SCHEDULED_INTERVAL_IN_HOURS") * time.Hour,
 		ServerPort:        viper.GetString("INGESTOR_PORT"),
+		BackendURL:        viper.GetString("BACKEND_URL"),
 	}
 
 	return config

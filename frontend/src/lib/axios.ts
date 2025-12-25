@@ -5,6 +5,9 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
 const axiosInstance = axios.create({
   baseURL: BACKEND_URL,
   withCredentials: true,
+  headers: {
+    "X-Origin": "Info",
+  },
 });
 
 axiosInstance.interceptors.response.use(

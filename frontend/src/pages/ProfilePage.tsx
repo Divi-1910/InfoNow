@@ -39,7 +39,7 @@ const ProfilePage = () => {
 
   const handleSave = async () => {
     if (!name.trim()) return;
-    
+
     setLoading(true);
     try {
       const { user: updatedUser } = await updateUserProfile(name);
@@ -58,7 +58,7 @@ const ProfilePage = () => {
         animate={{ y: 0, opacity: 1 }}
         className="border-b border-zinc-900"
       >
-        <div className="max-w-5xl mx-auto px-8 py-6 flex items-center gap-4">
+        <div className="max-w-full mx-auto px-8 py-6 flex justify-start gap-4">
           <motion.button
             onClick={() => navigate("/home")}
             whileHover={{ x: -2 }}

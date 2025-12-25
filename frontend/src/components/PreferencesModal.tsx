@@ -1,9 +1,14 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { useAtom } from "jotai";
-import { allTopicsAtom, selectedTopicIdsAtom, selectedSubTopicIdsAtom } from "../store/topicAtom";
+import {
+  allTopicsAtom,
+  selectedTopicIdsAtom,
+  selectedSubTopicIdsAtom,
+} from "../store/topicAtom";
 import { useState, useEffect } from "react";
-import { getAllTopics, saveUserTopics, saveUserSubTopics } from "../api/topics";
+import { saveUserTopics, saveUserSubTopics } from "../api/user";
+import { getAllTopics } from "../api/topics";
 
 interface PreferencesModalProps {
   isOpen: boolean;
@@ -13,7 +18,9 @@ interface PreferencesModalProps {
 const PreferencesModal = ({ isOpen, onClose }: PreferencesModalProps) => {
   const [allTopics, setAllTopics] = useAtom(allTopicsAtom);
   const [selectedTopicIds, setSelectedTopicIds] = useAtom(selectedTopicIdsAtom);
-  const [selectedSubTopicIds, setSelectedSubTopicIds] = useAtom(selectedSubTopicIdsAtom);
+  const [selectedSubTopicIds, setSelectedSubTopicIds] = useAtom(
+    selectedSubTopicIdsAtom
+  );
   const [activeTopic, setActiveTopic] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -30,7 +37,9 @@ const PreferencesModal = ({ isOpen, onClose }: PreferencesModalProps) => {
 
   const toggleSubTopic = (subTopicId: number, topicId: number) => {
     setSelectedSubTopicIds((prev) =>
-      prev.includes(subTopicId) ? prev.filter((id) => id !== subTopicId) : [...prev, subTopicId]
+      prev.includes(subTopicId)
+        ? prev.filter((id) => id !== subTopicId)
+        : [...prev, subTopicId]
     );
     if (!selectedTopicIds.includes(topicId)) {
       setSelectedTopicIds((prev) => [...prev, topicId]);
@@ -74,7 +83,9 @@ const PreferencesModal = ({ isOpen, onClose }: PreferencesModalProps) => {
               <div className="px-10 py-8 border-b border-zinc-900">
                 <div className="flex items-start justify-between">
                   <div>
-                    <h2 className="text-2xl font-light tracking-tight mb-1">Customize Your Feed</h2>
+                    <h2 className="text-2xl font-light tracking-tight mb-1">
+                      Customize Your Feed
+                    </h2>
                     <p className="text-sm text-zinc-600 font-light">
                       Select topics and subtopics to personalize your experience
                     </p>
@@ -116,7 +127,9 @@ const PreferencesModal = ({ isOpen, onClose }: PreferencesModalProps) => {
                               : "hover:bg-zinc-900"
                           }`}
                         >
-                          <span className="text-sm font-light">{topic.name}</span>
+                          <span className="text-sm font-light">
+                            {topic.name}
+                          </span>
                           {hasSelectedSubtopics && (
                             <motion.span
                               initial={{ scale: 0 }}
@@ -140,14 +153,18 @@ const PreferencesModal = ({ isOpen, onClose }: PreferencesModalProps) => {
                   <div className="flex-1 overflow-y-auto p-6">
                     {!currentTopic ? (
                       <div className="flex items-center justify-center h-full">
-                        <p className="text-sm text-zinc-700 font-light">Select a topic to see subtopics</p>
+                        <p className="text-sm text-zinc-700 font-light">
+                          Select a topic to see subtopics
+                        </p>
                       </div>
                     ) : (
                       <div className="grid grid-cols-3 gap-2">
                         {currentSubTopics.map((subtopic) => (
                           <motion.button
                             key={subtopic.id}
-                            onClick={() => toggleSubTopic(subtopic.id, currentTopic.id)}
+                            onClick={() =>
+                              toggleSubTopic(subtopic.id, currentTopic.id)
+                            }
                             whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
                             className={`px-3 py-2.5 rounded-lg text-xs font-light transition-all ${
@@ -168,7 +185,8 @@ const PreferencesModal = ({ isOpen, onClose }: PreferencesModalProps) => {
               {/* Footer */}
               <div className="px-10 py-6 border-t border-zinc-900 flex items-center justify-between bg-zinc-950/50">
                 <div className="text-sm text-zinc-600 font-light">
-                  {selectedTopicIds.length} topics, {selectedSubTopicIds.length} subtopics selected
+                  {selectedTopicIds.length} topics, {selectedSubTopicIds.length}{" "}
+                  subtopics selected
                 </div>
                 <motion.button
                   onClick={handleSave}

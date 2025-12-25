@@ -7,6 +7,7 @@ import { logger } from "./utils/logger.js";
 import { prisma } from "./lib/prisma.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import { originMiddleware } from "./middlewares/origin.js";
 
 dotenv.config();
 
@@ -14,12 +15,13 @@ const app: Application = express();
 const PORT = process.env.PORT;
 
 app.use(httpLogger);
+app.use(originMiddleware);
 
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: ["http://localhost:5173", "http://localhost:3000"],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Origin"],
     credentials: true,
   })
 );

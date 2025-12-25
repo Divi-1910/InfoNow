@@ -15,16 +15,16 @@ type DBDriver struct {
 }
 
 type Topic struct {
-	TopicID   int
-	TopicName string
-	TopicSlug string
-	SubTopics []SubTopic
+	TopicID   int        `json:"topicId"`
+	TopicName string     `json:"topicName"`
+	TopicSlug string     `json:"topicSlug"`
+	SubTopics []SubTopic `json:"subTopics"`
 }
 
 type SubTopic struct {
-	SubTopicID   int
-	SubTopicName string
-	SubTopicSlug string
+	SubTopicID   int    `json:"subTopicId"`
+	SubTopicName string `json:"subTopicName"`
+	SubTopicSlug string `json:"subTopicSlug"`
 }
 
 func NewDBDriver(ConnectionString string, MaxOpenConnections int, MaxIdleConnections int, ConnectionLifeTime time.Duration) *DBDriver {
