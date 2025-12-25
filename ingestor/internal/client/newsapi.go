@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"ingestor/internal/db"
+	"ingestor/internal/models"
 	"io"
 	"net/http"
 	"net/url"
@@ -44,7 +44,6 @@ type MultiNewsClient struct {
 }
 
 func NewMultiNewsClient(apiKey1, apiKey2, apiKey3 string) *MultiNewsClient {
-
 	return &MultiNewsClient{
 		clients: []*NewsAPIClient{
 			NewNewsAPIClient("https://newsapi.org/v2", apiKey1),
@@ -67,24 +66,24 @@ func NewNewsAPIClient(baseURL, apiKey string) *NewsAPIClient {
 	}
 }
 
-func (client *MultiNewsClient) GetArticles(ctx context.Context, subtopics []db.SubTopic) []Article {
+func (c *MultiNewsClient) GetArticles(ctx context.Context, subtopics []models.SubTopic) []Article {
 	var articles []Article
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	jobChan := make(chan db.SubTopic, len(subtopics))
+	jobChan := make(chan models.SubTopic, len(subtopics))
 
 	for _, subtopic := range subtopics {
 		jobChan <- subtopic
 	}
 	close(jobChan)
 
-	for _, client := range client.clients {
+	for _, client := range c.clients {
 		wg.Add(1)
 		go func(client *NewsAPIClient) {
 			defer wg.Done()
 			for subtopic := range jobChan {
-				newArticles := client.GetAllArticles(ctx, subtopic.SubTopicSlug)
+				newArticles := client.GetAllArticles(ctx, subtopic.Slug)
 
 				if len(newArticles) > 0 {
 					mu.Lock()
@@ -97,29 +96,28 @@ func (client *MultiNewsClient) GetArticles(ctx context.Context, subtopics []db.S
 
 	wg.Wait()
 	return articles
-
 }
 
-func (client *NewsAPIClient) GetAllArticles(ctx context.Context, query string) []Article {
+func (c *NewsAPIClient) GetAllArticles(ctx context.Context, query string) []Article {
 	searchQuery := strings.ReplaceAll(query, "-", " ")
 
-	response, err := client.GetEverythingRelevant(ctx, searchQuery)
+	response, err := c.GetEverythingRelevant(ctx, searchQuery)
 	if err != nil {
-		fmt.Printf("Error fetching for %s : %v", searchQuery, err)
+		fmt.Printf("Error fetching for %s : %v\n", searchQuery, err)
 		return []Article{}
 	}
 
 	return response.Articles
 }
 
-func (client *NewsAPIClient) GetEverythingRelevant(ctx context.Context, query string) (*NewsResponse, error) {
-	u, _ := url.Parse(client.BaseURL + "/everything")
+func (c *NewsAPIClient) GetEverythingRelevant(ctx context.Context, query string) (*NewsResponse, error) {
+	u, _ := url.Parse(c.BaseURL + "/everything")
 	q := u.Query()
 	q.Set("q", query)
 	q.Set("searchIn", "title")
 	q.Set("sortBy", "relevancy")
 	q.Set("language", "en")
-	q.Set("apiKey", client.APIKey)
+	q.Set("apiKey", c.APIKey)
 
 	u.RawQuery = q.Encode()
 
@@ -128,7 +126,7 @@ func (client *NewsAPIClient) GetEverythingRelevant(ctx context.Context, query st
 		return nil, err
 	}
 
-	resp, err := client.http.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -145,5 +143,4 @@ func (client *NewsAPIClient) GetEverythingRelevant(ctx context.Context, query st
 	}
 
 	return &result, nil
-
 }
