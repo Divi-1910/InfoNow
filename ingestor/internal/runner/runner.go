@@ -5,55 +5,36 @@ import (
 	"encoding/hex"
 	"fmt"
 	"ingestor/internal/client"
+	"ingestor/internal/identity"
+	"ingestor/internal/models"
 	"strings"
 	"time"
 )
 
-type DataPoint struct {
-	DataPointID string `json:"data_id"`
-	SourceType  string `json:"source_type"`
-	Topic       string `json:"topic"`
-	SubTopic    string `json:"subtopic,omitempty"`
-
-	Title       string `json:"title"`
-	URL         string `json:"url"`
-	Description string `json:"description"`
-
-	PublishedAt    time.Time `json:"published_at"`
-	FetchTimestamp time.Time `json:"fetch_timestamp"`
-
-	ContentHash string            `json:"content_hash"`
-	RawMetadata map[string]string `json:"raw_metadata"`
-}
-
-func GetHash(url string) string {
-	hash := sha256.Sum256([]byte(strings.TrimSpace(strings.ToLower(url))))
-
+func ComputeContentHash(text string) string {
+	hash := sha256.Sum256([]byte(strings.TrimSpace(text)))
 	return hex.EncodeToString(hash[:])
 }
 
-func GetUniqueDataIDFromArticle(url string, sourceType string) string {
-	urlHash := GetHash(url)
-	dataId := fmt.Sprintf("%s_%s", sourceType, urlHash)
-	return dataId
-}
+func ConvertArticleToDataPoint(article client.Article, topic string, subtopic string) (models.DataPoint, error) {
+	dataID, err := identity.NewsDataID(article.URL)
+	if err != nil {
+		return models.DataPoint{}, fmt.Errorf("failed to generate data_id: %w", err)
+	}
 
-func ConvertArticleToDataPoint(article client.Article, topic string, subtopic string) (DataPoint, error) {
 	publishedAt, err := time.Parse(time.RFC3339, article.PublishedAt)
 	if err != nil {
 		publishedAt = time.Now().UTC()
 	}
 
-	dataId := GetUniqueDataIDFromArticle(article.URL, "news")
-
 	contentBasis := strings.TrimSpace(article.Description)
 	if contentBasis == "" {
 		contentBasis = article.Title
 	}
-	contentHash := GetHash(contentBasis)
+	contentHash := ComputeContentHash(contentBasis)
 
-	dp := DataPoint{
-		DataPointID:    dataId,
+	return models.DataPoint{
+		DataID:         dataID,
 		SourceType:     "news",
 		Topic:          topic,
 		SubTopic:       subtopic,
@@ -67,7 +48,5 @@ func ConvertArticleToDataPoint(article client.Article, topic string, subtopic st
 			"source_name": article.Source.Name,
 			"author":      article.Author,
 		},
-	}
-
-	return dp, nil
+	}, nil
 }

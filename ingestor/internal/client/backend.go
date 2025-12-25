@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"ingestor/internal/db"
+	"ingestor/internal/models"
 	"io"
 	"net/http"
 	"net/url"
@@ -21,16 +21,16 @@ type backendResponse struct {
 }
 
 type backendTopic struct {
-	TopicID   int               `json:"id"`
-	TopicName string            `json:"name"`
-	TopicSlug string            `json:"slug"`
+	ID        int               `json:"id"`
+	Name      string            `json:"name"`
+	Slug      string            `json:"slug"`
 	SubTopics []backendSubTopic `json:"subTopics"`
 }
 
 type backendSubTopic struct {
-	SubTopicID   int    `json:"id"`
-	SubTopicName string `json:"name"`
-	SubTopicSlug string `json:"slug"`
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
 }
 
 func NewBackendClient(BackendURL string) *BackendClient {
@@ -45,8 +45,8 @@ func NewBackendClient(BackendURL string) *BackendClient {
 	}
 }
 
-func (client *BackendClient) GetAllTopics(ctx context.Context) ([]db.Topic, error) {
-	backendURL, err := url.Parse(client.BackendURL + "/api/topics/all-topics")
+func (c *BackendClient) GetAllTopics(ctx context.Context) ([]models.Topic, error) {
+	backendURL, err := url.Parse(c.BackendURL + "/api/topics/all-topics")
 	if err != nil {
 		return nil, fmt.Errorf("invalid backend URL: %w", err)
 	}
@@ -58,41 +58,41 @@ func (client *BackendClient) GetAllTopics(ctx context.Context) ([]db.Topic, erro
 
 	req.Header.Set("X-Origin", "Ingest")
 
-	resp, err := client.http.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("error making request to backend: %w", err)
+		return nil, fmt.Errorf("error making request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("error reading response body: %w", err)
+		return nil, fmt.Errorf("error reading body: %w", err)
 	}
 
 	var backendResp backendResponse
 	if err := json.Unmarshal(body, &backendResp); err != nil {
-		return nil, fmt.Errorf("error decoding backend response: %w", err)
+		return nil, fmt.Errorf("error decoding: %w", err)
 	}
 
-	topics := make([]db.Topic, len(backendResp.Topics))
-	for i, backendTopic := range backendResp.Topics {
-		subTopics := make([]db.SubTopic, len(backendTopic.SubTopics))
-		for j, backendSubTopic := range backendTopic.SubTopics {
-			subTopics[j] = db.SubTopic{
-				SubTopicID:   backendSubTopic.SubTopicID,
-				SubTopicName: backendSubTopic.SubTopicName,
-				SubTopicSlug: backendSubTopic.SubTopicSlug,
+	topics := make([]models.Topic, len(backendResp.Topics))
+	for i, bt := range backendResp.Topics {
+		subTopics := make([]models.SubTopic, len(bt.SubTopics))
+		for j, bst := range bt.SubTopics {
+			subTopics[j] = models.SubTopic{
+				ID:   bst.ID,
+				Name: bst.Name,
+				Slug: bst.Slug,
 			}
 		}
-		topics[i] = db.Topic{
-			TopicID:   backendTopic.TopicID,
-			TopicName: backendTopic.TopicName,
-			TopicSlug: backendTopic.TopicSlug,
+		topics[i] = models.Topic{
+			ID:        bt.ID,
+			Name:      bt.Name,
+			Slug:      bt.Slug,
 			SubTopics: subTopics,
 		}
 	}
