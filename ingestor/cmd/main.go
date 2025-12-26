@@ -4,23 +4,40 @@ import (
 	"context"
 	"ingestor/internal/client"
 	"ingestor/internal/config"
+	"ingestor/internal/deduper"
+	"ingestor/internal/ingest"
+	"ingestor/internal/producer"
+	"ingestor/internal/redis"
 	"log"
+	"time"
 )
 
 func main() {
-	log.Println("Starting the Ingestor ... ")
+	log.Println("Starting Ingestor")
 
-	config := config.LoadConfig()
+	cfg := config.LoadConfig()
 
-	backendClient := client.NewBackendClient(config.BackendURL)
+	redisClient := redis.NewRedisClient("localhost:6379", "", 0)
+	defer redisClient.Close()
+
+	dup := deduper.New(redisClient, 14*24*time.Hour)
+
+	backendClient := client.NewBackendClient(cfg.BackendURL)
+	newsClient := client.NewMultiNewsClient(cfg.NewsAPIKey1, cfg.NewsAPIKey2, cfg.NewsAPIKey3)
+
+	kafkaProducer := producer.NewKafkaProducer([]string{"localhost:9093"})
+	defer kafkaProducer.Close()
+
+	ingestor := ingest.NewNewsIngestor(backendClient, newsClient, dup, kafkaProducer)
 
 	ctx := context.Background()
 
-	topics, err := backendClient.GetAllTopics(ctx)
-	// if err != nil {
-	// 	log.Fatalf("Error getting topics: %v", err)
-	// }
+	ticker := time.NewTicker(cfg.ScheduledInterval)
+	defer ticker.Stop()
 
-	// log.Println(topics)
+	ingestor.Run(ctx)
 
+	for range ticker.C {
+		ingestor.Run(ctx)
+	}
 }
