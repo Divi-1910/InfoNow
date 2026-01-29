@@ -209,9 +209,12 @@ model RawApiResponse {
 // Events are written to this table in the same transaction as business data,
 // then a separate publisher process reads and publishes to Kafka
 enum OutboxEventType {
+  // Transformer events (publish to Kafka)
   NewsArticleCreated
   RedditPostCreated
   YoutubeVideoCreated
+  // Enricher events (index to OpenSearch)
+  NewsArticleEnriched
 }
 
 model OutboxEvent {
@@ -219,8 +222,8 @@ model OutboxEvent {
   aggregateType String          // "news", "reddit", "youtube"
   aggregateId   String          // The dataPointId
   eventType     OutboxEventType
-  topic         String          // Kafka topic to publish to
-  payload       Json            // The CleanNewsPoint JSON
+  topic         String          // Target: Kafka topic or OpenSearch index
+  payload       Json            // Event payload (CleanNewsPoint, OpenSearchDocument, etc.)
   processed     Boolean         @default(false)
   retryCount    Int             @default(0)
   maxRetries    Int             @default(3)

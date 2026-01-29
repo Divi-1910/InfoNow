@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     scraper_timeout_seconds: int = 10
     batch_size: int = 10
 
+    # Outbox publisher settings
+    outbox_poll_interval: float = 1.0  # seconds
+    outbox_batch_size: int = 100
+    outbox_max_retries: int = 3
+
     @property
     def kafka_brokers_list(self) -> List[str]:
         return self.kafka_brokers.split(",")

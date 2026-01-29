@@ -11,6 +11,7 @@ from .chunker import HybridChunker
 from .embedder import OllamaEmbedder
 from .storage import PostgresStorage, OpenSearchStorage
 from .models import CleanNewsPoint, OpenSearchDocument
+from .outbox_publisher import OutboxPublisher
 
 # Configure logging
 logging.basicConfig(
@@ -57,6 +58,16 @@ class NewsEnricher:
         )
         self.opensearch.create_index_if_not_exists()
 
+        # Initialize outbox publisher for reliable OpenSearch indexing
+        self.outbox_publisher = OutboxPublisher(
+            database_url=settings.database_url,
+            opensearch=self.opensearch,
+            poll_interval=settings.outbox_poll_interval,
+            batch_size=settings.outbox_batch_size,
+            max_retries=settings.outbox_max_retries,
+        )
+        self.outbox_publisher.connect()
+
         logger.info("All components initialized successfully")
 
     async def process_article(self, article: CleanNewsPoint) -> bool:
@@ -99,16 +110,7 @@ class NewsEnricher:
                 logger.warning(f"No valid embeddings for {article.url}")
                 return False
 
-            # Step 4: Save to PostgreSQL
-            self.postgres.save_enriched_article(
-                data_point_id=article.data_point_id,
-                full_content=full_content,
-                summary=None,  # TODO: Add summarization
-                chunks=valid_chunks,
-                embeddings=valid_embeddings,
-            )
-
-            # Step 5: Index to OpenSearch
+            # Build OpenSearch documents for outbox
             os_documents = [
                 OpenSearchDocument(
                     data_id=article.id,
@@ -127,11 +129,21 @@ class NewsEnricher:
                 for chunk, embedding in zip(valid_chunks, valid_embeddings)
             ]
 
-            self.opensearch.index_documents(os_documents)
+            # Step 4: Save to PostgreSQL + create OutboxEvent (single transaction)
+            # The outbox publisher will handle OpenSearch indexing asynchronously
+            self.postgres.save_enriched_article(
+                data_point_id=article.data_point_id,
+                full_content=full_content,
+                summary=None,  # TODO: Add summarization
+                chunks=valid_chunks,
+                embeddings=valid_embeddings,
+                opensearch_documents=os_documents,
+                opensearch_index=settings.opensearch_index,
+            )
 
             logger.info(
                 f"Enriched article: {article.title[:50]}... "
-                f"({len(valid_chunks)} chunks indexed)"
+                f"({len(valid_chunks)} chunks queued for indexing)"
             )
             return True
 
@@ -141,6 +153,8 @@ class NewsEnricher:
 
     async def run(self):
         """Main processing loop"""
+        # Start outbox publisher as background task
+        outbox_task = asyncio.create_task(self.outbox_publisher.start())
         logger.info("Starting enrichment loop...")
 
         while self.running:
@@ -174,6 +188,8 @@ class NewsEnricher:
         """Graceful shutdown"""
         logger.info("Shutting down...")
         self.running = False
+        self.outbox_publisher.stop()
+        self.outbox_publisher.close()
         self.consumer.close()
         self.postgres.close()
         self.opensearch.close()
