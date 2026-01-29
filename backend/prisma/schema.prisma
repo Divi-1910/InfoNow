@@ -21,6 +21,7 @@ model User {
   userTopics    UserTopic[]
   userSubTopics UserSubTopic[]
   refreshTokens RefreshToken[]
+  savedItems    SavedItem[]
 }
 
 model RefreshToken {
@@ -73,6 +74,18 @@ model UserSubTopic {
   @@unique([userId, subTopicId])
 }
 
+model SavedItem {
+  id          Int       @id @default(autoincrement())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      Int
+  dataPoint   DataPoint @relation(fields: [dataPointId], references: [id], onDelete: Cascade)
+  dataPointId String
+  savedAt     DateTime  @default(now())
+
+  @@unique([userId, dataPointId])
+  @@index([userId, savedAt])
+}
+
 enum DataType {
   News
   Reddit
@@ -102,6 +115,9 @@ model DataPoint {
 
   // Enriched content (future)
   enrichedNews EnrichedNewsArticle?
+
+  // User saved items
+  savedByUsers SavedItem[]
 
   @@index([topicId])
   @@index([subTopicId])

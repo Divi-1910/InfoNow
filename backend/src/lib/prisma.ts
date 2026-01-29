@@ -6,7 +6,8 @@ const globalForPrisma = global as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-const pool = new Pool({ connectionString: process.env.POOLED_DATABASE_URL });
+// Use DIRECT_DATABASE_URL when pgbouncer isn't available
+const pool = new Pool({ connectionString: process.env.DIRECT_DATABASE_URL || process.env.POOLED_DATABASE_URL });
 const adapter = new PrismaPg(pool);
 
 export const prisma =
