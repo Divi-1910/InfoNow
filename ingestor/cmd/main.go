@@ -25,7 +25,7 @@ func main() {
 	backendClient := client.NewBackendClient(cfg.BackendURL)
 	newsClient := client.NewMultiNewsClient(cfg.NewsAPIKey1, cfg.NewsAPIKey2, cfg.NewsAPIKey3)
 
-	kafkaProducer := producer.NewKafkaProducer([]string{"localhost:9093"})
+	kafkaProducer := producer.NewKafkaProducer([]string{"localhost:9092"})
 	defer kafkaProducer.Close()
 
 	ingestor := ingest.NewNewsIngestor(backendClient, newsClient, dup, kafkaProducer)

@@ -97,9 +97,11 @@ func (c *BackendClient) GetAllTopics(ctx context.Context) ([]models.Topic, error
 		}
 	}
 
-	if len(topics) > 2 {
-		topics = topics[:2]
+	if len(topics) > 1 {
+		topics = topics[:1]
 	}
+
+	print(topics)
 
 	return topics, nil
 }

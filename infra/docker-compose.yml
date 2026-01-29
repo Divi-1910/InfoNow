@@ -34,6 +34,8 @@ services:
     container_name: redis-name
     restart: unless-stopped
     command: ["redis-server"]
+    ports:
+      - "6379:6379"
     volumes:
       - redis_data:/data
 
@@ -69,7 +71,7 @@ services:
       - node.name=os-main
       - discovery.type=single-node
       - bootstrap.memory_lock=true
-      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
       - plugins.security.disabled=true
       - DISABLE_INSTALL_DEMO_CONFIG=true
     ports:
@@ -101,6 +103,54 @@ services:
       DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
     ports:
       - "5601:5601"
+
+  # ============================================
+  # Data Pipeline Services
+  # ============================================
+
+  transformer:
+    build:
+      context: ../transformer
+      dockerfile: Dockerfile
+    container_name: transformer
+    depends_on:
+      - broker
+      - postgres
+    environment:
+      KAFKA_BROKERS: broker:29092
+      KAFKA_CONSUMER_GROUP: transformer-news
+      KAFKA_INPUT_TOPIC: ingest.news.raw
+      KAFKA_OUTPUT_TOPIC: process.news.clean
+      DATABASE_URL: postgresql://Divyansh:dabadebadeba@postgres:5432/info_now_db
+      BATCH_SIZE: "100"
+    restart: unless-stopped
+
+  news-enricher:
+    build:
+      context: ../enrichers/news-enricher
+      dockerfile: Dockerfile
+    container_name: news-enricher
+    depends_on:
+      - broker
+      - postgres
+      - opensearch
+    environment:
+      KAFKA_BROKERS: broker:29092
+      KAFKA_CONSUMER_GROUP: enricher-news
+      KAFKA_INPUT_TOPIC: process.news.clean
+      DATABASE_URL: postgresql://Divyansh:dabadebadeba@postgres:5432/info_now_db
+      OPENSEARCH_URL: http://os-main:9200
+      OPENSEARCH_INDEX: news-enriched
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: nomic-embed-text
+      EMBEDDING_DIMENSION: "768"
+      MAX_CHUNK_TOKENS: "512"
+      SCRAPER_WORKERS: "10"
+      SCRAPER_TIMEOUT_SECONDS: "10"
+      BATCH_SIZE: "10"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
 
 volumes:
   postgres_data:

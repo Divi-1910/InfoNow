@@ -8,8 +8,7 @@ import {
   selectedSubTopicIdsAtom,
 } from "../store/topicAtom";
 import { useState, useEffect } from "react";
-import { getUserPreferences } from "../api/topics";
-import { updateUserProfile } from "../api/user";
+import { getUserPreferences, updateUserProfile } from "../api/user";
 import PreferencesModal from "../components/PreferencesModal";
 
 const ProfilePage = () => {

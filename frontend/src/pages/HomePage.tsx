@@ -12,7 +12,7 @@ import { useState, useEffect } from "react";
 import { useAtom } from "jotai";
 import { useSearchParams } from "react-router-dom";
 import { userAtom } from "../store/userAtom";
-import { getUserPreferences } from "../api/topics";
+import { getUserPreferences } from "../api/user";
 import UserProfileDropdown from "../components/UserProfileDropdown";
 import PreferencesModal from "../components/PreferencesModal";
 

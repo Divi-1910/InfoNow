@@ -15,7 +15,6 @@ const app: Application = express();
 const PORT = process.env.PORT;
 
 app.use(httpLogger);
-app.use(originMiddleware);
 
 app.use(
   cors({
@@ -25,6 +24,8 @@ app.use(
     credentials: true,
   })
 );
+
+app.use(originMiddleware);
 
 app.use(express.json());
 app.use(cookieParser());

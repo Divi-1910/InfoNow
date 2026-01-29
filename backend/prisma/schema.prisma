@@ -40,6 +40,7 @@ model Topic {
   slug       String      @unique
   subTopics  SubTopic[]
   userTopics UserTopic[]
+  dataPoints DataPoint[]
 }
 
 model SubTopic {
@@ -49,6 +50,7 @@ model SubTopic {
   topic         Topic?         @relation(fields: [topicId], references: [id])
   topicId       Int?
   userSubTopics UserSubTopic[]
+  dataPoints    DataPoint[]
 }
 
 model UserTopic {
@@ -79,35 +81,153 @@ enum DataType {
 }
 
 model DataPoint {
-  id           String               @id @default(uuid())
-  type         DataType
-  hash         String
-  createdAt    DateTime             @default(now())
-  rawNews      RawNewsArticle?
+  id          String   @id @default(uuid())
+  type        DataType
+  contentHash String // SHA256 hash of content for dedup/change detection
+
+  // Topic classification
+  topic      Topic?    @relation(fields: [topicId], references: [id])
+  topicId    Int?
+  subTopic   SubTopic? @relation(fields: [subTopicId], references: [id])
+  subTopicId Int?
+
+  // Timestamps
+  fetchedAt DateTime // When the data was ingested
+  createdAt DateTime @default(now())
+
+  // Source-specific raw content (only one will be populated based on type)
+  rawNews    RawNewsArticle?
+  rawReddit  RawRedditPost?
+  rawYoutube RawYoutubeVideo?
+
+  // Enriched content (future)
   enrichedNews EnrichedNewsArticle?
+
+  @@index([topicId])
+  @@index([subTopicId])
+  @@index([type])
+  @@index([fetchedAt])
 }
 
 model RawNewsArticle {
   id          String   @id @default(uuid())
   dataId      String   @unique
+  title       String
+  url         String   @unique
+  description String?
+  publishedAt DateTime
   sourceName  String?
   author      String?
-  title       String
-  description String?
-  url         String   @unique
-  urlToImage  String?
-  publishedAt DateTime
-  content     String?
+  imageUrl    String?
 
   dataPoint DataPoint @relation(fields: [dataId], references: [id], onDelete: Cascade)
+
+  @@index([publishedAt])
+}
+
+model RawRedditPost {
+  id          String   @id @default(uuid())
+  dataId      String   @unique
+  postId      String   @unique // Reddit's unique post ID (e.g., "t3_abc123")
+  subreddit   String
+  title       String
+  selftext    String? // Post body text (empty for link posts)
+  author      String
+  score       Int
+  numComments Int
+  permalink   String // Reddit URL path (e.g., "/r/technology/comments/...")
+  createdUtc  DateTime
+  isVideo     Boolean  @default(false)
+  thumbnail   String?
+
+  dataPoint DataPoint @relation(fields: [dataId], references: [id], onDelete: Cascade)
+
+  @@index([subreddit])
+  @@index([createdUtc])
+  @@index([score])
+}
+
+model RawYoutubeVideo {
+  id           String   @id @default(uuid())
+  dataId       String   @unique
+  videoId      String   @unique // YouTube's video ID (e.g., "dQw4w9WgXcQ")
+  channelId    String
+  channelTitle String
+  title        String
+  description  String?
+  thumbnailUrl String?
+  publishedAt  DateTime
+  duration     String? // ISO 8601 duration (e.g., "PT1H2M3S")
+  viewCount    BigInt   @default(0)
+  likeCount    BigInt   @default(0)
+
+  dataPoint DataPoint @relation(fields: [dataId], references: [id], onDelete: Cascade)
+
+  @@index([channelId])
+  @@index([publishedAt])
+  @@index([viewCount])
 }
 
 model EnrichedNewsArticle {
-  id              String  @id @default(uuid())
-  dataId          String  @unique
-  rawContent      String?
-  enrichedContent String?
-  summary         String?
+  id          String   @id @default(uuid())
+  dataId      String   @unique
+  fullContent String   @db.Text // Scraped full article text
+  summary     String?  @db.Text // LLM-generated summary
+  scrapedAt   DateTime
 
-  dataPoint DataPoint @relation(fields: [dataId], references: [id], onDelete: Cascade)
+  dataPoint DataPoint   @relation(fields: [dataId], references: [id], onDelete: Cascade)
+  chunks    NewsChunk[]
+
+  @@index([scrapedAt])
+}
+
+model NewsChunk {
+  id                String  @id @default(uuid())
+  enrichedArticleId String
+  chunkIndex        Int
+  content           String  @db.Text
+  embedding         Float[] // Vector embedding
+  tokenCount        Int
+
+  enrichedArticle EnrichedNewsArticle @relation(fields: [enrichedArticleId], references: [id], onDelete: Cascade)
+
+  @@index([enrichedArticleId])
+}
+
+// Raw API response dump for reprocessing capability
+model RawApiResponse {
+  id         String   @id @default(uuid())
+  sourceType DataType
+  payload    Json // Original API response
+  receivedAt DateTime @default(now())
+
+  @@index([sourceType])
+  @@index([receivedAt])
+}
+
+// Transactional Outbox Pattern - ensures reliable message delivery
+// Events are written to this table in the same transaction as business data,
+// then a separate publisher process reads and publishes to Kafka
+enum OutboxEventType {
+  NewsArticleCreated
+  RedditPostCreated
+  YoutubeVideoCreated
+}
+
+model OutboxEvent {
+  id            String          @id @default(uuid())
+  aggregateType String          // "news", "reddit", "youtube"
+  aggregateId   String          // The dataPointId
+  eventType     OutboxEventType
+  topic         String          // Kafka topic to publish to
+  payload       Json            // The CleanNewsPoint JSON
+  processed     Boolean         @default(false)
+  retryCount    Int             @default(0)
+  maxRetries    Int             @default(3)
+  lastError     String?
+  createdAt     DateTime        @default(now())
+  processedAt   DateTime?
+
+  @@index([processed, createdAt]) // For efficient polling: WHERE processed=false ORDER BY createdAt
+  @@index([aggregateId])          // For looking up events by data point
 }

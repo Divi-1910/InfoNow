@@ -45,6 +45,7 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 	totalFetched := 0
 	totalDeduped := 0
 	totalPublished := 0
+	firstFew := 0
 
 	for _, topic := range topics {
 		if len(topic.SubTopics) == 0 {
@@ -74,14 +75,19 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 				continue
 			}
 
-			dp, err := runner.ConvertArticleToDataPoint(article, topic.Slug, "")
+			if firstFew < 3 {
+				log.Printf("Publishing unique article: %s", article.Title)
+				firstFew++
+			}
+
+			np, err := runner.ConvertArticleToNewsPoint(article, topic.Slug, "")
 			if err != nil {
 				log.Printf("Failed to convert article: %v", err)
 				continue
 			}
 
-			if err := n.producer.Publish(ctx, dp); err != nil {
-				log.Printf("Failed to publish %s: %v", dp.DataID, err)
+			if err := n.producer.PublishNews(ctx, np); err != nil {
+				log.Printf("Failed to publish %s: %v", np.ID, err)
 				continue
 			}
 

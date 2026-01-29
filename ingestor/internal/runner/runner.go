@@ -16,10 +16,10 @@ func ComputeContentHash(text string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func ConvertArticleToDataPoint(article client.Article, topic string, subtopic string) (models.DataPoint, error) {
+func ConvertArticleToNewsPoint(article client.Article, topic string, subtopic string) (models.NewsPoint, error) {
 	dataID, err := identity.NewsDataID(article.URL)
 	if err != nil {
-		return models.DataPoint{}, fmt.Errorf("failed to generate data_id: %w", err)
+		return models.NewsPoint{}, fmt.Errorf("failed to generate data_id: %w", err)
 	}
 
 	publishedAt, err := time.Parse(time.RFC3339, article.PublishedAt)
@@ -33,20 +33,20 @@ func ConvertArticleToDataPoint(article client.Article, topic string, subtopic st
 	}
 	contentHash := ComputeContentHash(contentBasis)
 
-	return models.DataPoint{
-		DataID:         dataID,
-		SourceType:     "news",
-		Topic:          topic,
-		SubTopic:       subtopic,
-		Title:          article.Title,
-		URL:            article.URL,
-		Description:    article.Description,
-		PublishedAt:    publishedAt,
-		FetchTimestamp: time.Now().UTC(),
-		ContentHash:    contentHash,
-		RawMetadata: map[string]string{
-			"source_name": article.Source.Name,
-			"author":      article.Author,
+	return models.NewsPoint{
+		BasePoint: models.BasePoint{
+			ID:             dataID,
+			Topic:          topic,
+			SubTopic:       subtopic,
+			FetchTimestamp: time.Now().UTC(),
+			ContentHash:    contentHash,
 		},
+		Title:       article.Title,
+		URL:         article.URL,
+		Description: article.Description,
+		PublishedAt: publishedAt,
+		SourceName:  article.Source.Name,
+		Author:      article.Author,
+		ImageURL:    article.URLToImage,
 	}, nil
 }

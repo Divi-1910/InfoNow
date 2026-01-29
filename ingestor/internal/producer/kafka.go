@@ -22,14 +22,14 @@ func NewKafkaProducer(brokers []string) *KafkaProducer {
 	}
 }
 
-func (p *KafkaProducer) Publish(ctx context.Context, dp models.DataPoint) error {
-	value, err := json.Marshal(dp)
+func (p *KafkaProducer) PublishNews(ctx context.Context, np models.NewsPoint) error {
+	value, err := json.Marshal(np)
 	if err != nil {
 		return err
 	}
 
 	return p.writer.WriteMessages(ctx, kafka.Message{
-		Key:   []byte(dp.DataID),
+		Key:   []byte(np.ID),
 		Value: value,
 	})
 }
