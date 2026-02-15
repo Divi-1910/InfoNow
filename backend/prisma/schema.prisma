@@ -256,9 +256,13 @@ enum OutboxEventType {
   NewsArticleCreated
   RedditPostCreated
   YoutubeVideoCreated
-  // Enricher events (index to OpenSearch)
+  // Enricher events (index to OpenSearch chunk indices)
   NewsArticleEnriched
   YoutubeVideoEnriched
+  // Mega index events (index to mega_index for feed/search API)
+  DataPointCreated            // Transformer → initial mega_index doc (has_enriched=false)
+  NewsArticleEnrichedMega     // News enricher → mega_index upsert (has_enriched=true + summary)
+  YoutubeVideoEnrichedMega    // YT enricher → mega_index upsert (has_enriched=true + summary)
 }
 
 model OutboxEvent {

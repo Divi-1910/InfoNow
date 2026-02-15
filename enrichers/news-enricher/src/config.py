@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # OpenSearch settings
     opensearch_url: str = "http://localhost:9200"
-    opensearch_index: str = "news-enriched"
+    opensearch_index: str = "news_index"
 
     # Ollama settings
     ollama_url: str = "http://localhost:11434"

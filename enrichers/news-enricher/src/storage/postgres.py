@@ -2,11 +2,11 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import execute_values
 
-from ..models import EnrichedArticle, Chunk, OpenSearchDocument
+from ..models import EnrichedArticle, Chunk, OpenSearchDocument, MegaDocument
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,42 @@ class PostgresStorage:
             self.conn.close()
             logger.info("Closed PostgreSQL connection")
 
+    def get_topic_by_slug(
+        self, topic_slug: str, subtopic_slug: str
+    ) -> Tuple[Optional[int], str, Optional[int], str]:
+        """
+        Look up topic and subtopic IDs/names by slug.
+        Returns (topic_id, topic_name, subtopic_id, subtopic_name).
+        """
+        topic_id: Optional[int] = None
+        topic_name: str = ""
+        subtopic_id: Optional[int] = None
+        subtopic_name: str = ""
+
+        try:
+            with self.conn.cursor() as cur:
+                if topic_slug:
+                    cur.execute(
+                        'SELECT id, name FROM "Topic" WHERE slug = %s',
+                        (topic_slug,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        topic_id, topic_name = row[0], row[1]
+
+                if subtopic_slug:
+                    cur.execute(
+                        'SELECT id, name FROM "SubTopic" WHERE slug = %s',
+                        (subtopic_slug,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        subtopic_id, subtopic_name = row[0], row[1]
+        except Exception as e:
+            logger.warning(f"Failed to look up topic slugs: {e}")
+
+        return topic_id, topic_name, subtopic_id, subtopic_name
+
     def save_enriched_article(
         self,
         data_point_id: str,
@@ -38,13 +74,15 @@ class PostgresStorage:
         embeddings: List[List[float]],
         opensearch_documents: Optional[List[OpenSearchDocument]] = None,
         opensearch_index: Optional[str] = None,
+        mega_document: Optional[MegaDocument] = None,
     ) -> str:
         """
-        Save enriched article, chunks, and outbox event in a single transaction.
+        Save enriched article, chunks, and outbox events in a single transaction.
         Returns the enriched article ID.
 
-        If opensearch_documents and opensearch_index are provided, an OutboxEvent
-        is created to ensure reliable indexing to OpenSearch.
+        Emits:
+        - NewsArticleEnriched OutboxEvent (chunks → news_index)
+        - NewsArticleEnrichedMega OutboxEvent (mega doc → mega_index upsert)
         """
         try:
             with self.conn.cursor() as cur:
@@ -82,13 +120,11 @@ class PostgresStorage:
                         template="(gen_random_uuid(), %s, %s, %s, %s, %s)",
                     )
 
-                # 3. Insert OutboxEvent for OpenSearch indexing (same transaction)
+                # 3. OutboxEvent for news_index chunk indexing
                 if opensearch_documents and opensearch_index:
-                    # Serialize documents for outbox payload
                     payload = {
                         "documents": [doc.model_dump(mode="json") for doc in opensearch_documents]
                     }
-
                     cur.execute(
                         """
                         INSERT INTO "OutboxEvent"
@@ -97,9 +133,22 @@ class PostgresStorage:
                         """,
                         (str(uuid.uuid4()), data_point_id, opensearch_index, json.dumps(payload)),
                     )
-                    logger.debug(f"Created outbox event for {len(opensearch_documents)} documents")
+                    logger.debug(f"Created outbox event for {len(opensearch_documents)} chunk documents")
 
-                # 4. Commit all writes atomically
+                # 4. OutboxEvent for mega_index upsert
+                if mega_document is not None:
+                    mega_payload = mega_document.model_dump(mode="json")
+                    cur.execute(
+                        """
+                        INSERT INTO "OutboxEvent"
+                        (id, "aggregateType", "aggregateId", "eventType", topic, payload, processed, "retryCount", "maxRetries", "createdAt")
+                        VALUES (%s, 'enriched_news', %s, 'NewsArticleEnrichedMega', 'mega_index', %s, false, 0, 3, NOW())
+                        """,
+                        (str(uuid.uuid4()), data_point_id, json.dumps(mega_payload)),
+                    )
+                    logger.debug(f"Created mega outbox event for data_point_id={data_point_id}")
+
+                # 5. Commit all writes atomically
                 self.conn.commit()
                 logger.debug(f"Saved enriched article {enriched_id} with {len(chunks)} chunks")
                 return enriched_id

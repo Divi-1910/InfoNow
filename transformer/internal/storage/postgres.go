@@ -107,14 +107,15 @@ func (s *PostgresStorage) SaveNewsArticleWithOutbox(ctx context.Context, np mode
 	}
 	defer tx.Rollback()
 
-	// First, get topic and subtopic IDs if they exist
+	// First, get topic and subtopic IDs + names if they exist
 	var topicID, subTopicID *int
+	var topicName, subTopicName string
 	if np.Topic != "" {
 		var tid int
 		err := tx.QueryRowContext(ctx,
-			`SELECT id FROM "Topic" WHERE slug = $1`,
+			`SELECT id, name FROM "Topic" WHERE slug = $1`,
 			np.Topic,
-		).Scan(&tid)
+		).Scan(&tid, &topicName)
 		if err == nil {
 			topicID = &tid
 		}
@@ -122,9 +123,9 @@ func (s *PostgresStorage) SaveNewsArticleWithOutbox(ctx context.Context, np mode
 	if np.SubTopic != "" {
 		var stid int
 		err := tx.QueryRowContext(ctx,
-			`SELECT id FROM "SubTopic" WHERE slug = $1`,
+			`SELECT id, name FROM "SubTopic" WHERE slug = $1`,
 			np.SubTopic,
-		).Scan(&stid)
+		).Scan(&stid, &subTopicName)
 		if err == nil {
 			subTopicID = &stid
 		}
@@ -159,7 +160,7 @@ func (s *PostgresStorage) SaveNewsArticleWithOutbox(ctx context.Context, np mode
 		return "", fmt.Errorf("failed to insert RawNewsArticle: %w", err)
 	}
 
-	// 3. Create CleanNewsPoint and insert OutboxEvent in same transaction
+	// 3. Create CleanNewsPoint and insert Kafka OutboxEvent
 	cleanPoint := models.CleanNewsPoint{
 		ID:             np.ID,
 		Topic:          np.Topic,
@@ -176,7 +177,7 @@ func (s *PostgresStorage) SaveNewsArticleWithOutbox(ctx context.Context, np mode
 		DataPointID:    dataPointID,
 	}
 
-	payload, err := json.Marshal(cleanPoint)
+	kafkaPayload, err := json.Marshal(cleanPoint)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal CleanNewsPoint: %w", err)
 	}
@@ -185,13 +186,50 @@ func (s *PostgresStorage) SaveNewsArticleWithOutbox(ctx context.Context, np mode
 		`INSERT INTO "OutboxEvent"
 		 (id, "aggregateType", "aggregateId", "eventType", topic, payload, processed, "retryCount", "maxRetries", "createdAt")
 		 VALUES (gen_random_uuid(), 'news', $1, 'NewsArticleCreated', $2, $3, false, 0, 3, NOW())`,
-		dataPointID, kafkaTopic, payload,
+		dataPointID, kafkaTopic, kafkaPayload,
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to insert OutboxEvent: %w", err)
+		return "", fmt.Errorf("failed to insert Kafka OutboxEvent: %w", err)
 	}
 
-	// 4. Commit all three writes atomically
+	// 4. Create MegaDocument and insert DataPointCreated OutboxEvent for mega_index
+	url := np.URL
+	megaDoc := models.MegaDocument{
+		DataPointID:    dataPointID,
+		SourceType:     "news",
+		FetchTimestamp: np.FetchTimestamp.UTC().Format("2006-01-02T15:04:05Z"),
+		TopicID:        topicID,
+		TopicName:      topicName,
+		TopicSlug:      np.Topic,
+		SubTopicID:     subTopicID,
+		SubTopicName:   subTopicName,
+		SubTopicSlug:   np.SubTopic,
+		Title:          np.Title,
+		Description:    nullString(np.Description),
+		HasEnriched:    false,
+		PublishedAt:    np.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		URL:            &url,
+		SourceName:     nullString(np.SourceName),
+		Author:         nullString(np.Author),
+		ImageURL:       nullString(np.ImageURL),
+	}
+
+	megaPayload, err := json.Marshal(megaDoc)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal MegaDocument: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO "OutboxEvent"
+		 (id, "aggregateType", "aggregateId", "eventType", topic, payload, processed, "retryCount", "maxRetries", "createdAt")
+		 VALUES (gen_random_uuid(), 'news', $1, 'DataPointCreated', 'mega_index', $2, false, 0, 3, NOW())`,
+		dataPointID, megaPayload,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to insert DataPointCreated OutboxEvent: %w", err)
+	}
+
+	// 5. Commit all writes atomically
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -208,16 +246,17 @@ func (s *PostgresStorage) SaveYoutubeVideoWithOutbox(ctx context.Context, yp mod
 	defer tx.Rollback()
 
 	var topicID, subTopicID *int
+	var topicName, subTopicName string
 	if yp.Topic != "" {
 		var tid int
-		err := tx.QueryRowContext(ctx, `SELECT id FROM "Topic" WHERE slug = $1`, yp.Topic).Scan(&tid)
+		err := tx.QueryRowContext(ctx, `SELECT id, name FROM "Topic" WHERE slug = $1`, yp.Topic).Scan(&tid, &topicName)
 		if err == nil {
 			topicID = &tid
 		}
 	}
 	if yp.SubTopic != "" {
 		var stid int
-		err := tx.QueryRowContext(ctx, `SELECT id FROM "SubTopic" WHERE slug = $1`, yp.SubTopic).Scan(&stid)
+		err := tx.QueryRowContext(ctx, `SELECT id, name FROM "SubTopic" WHERE slug = $1`, yp.SubTopic).Scan(&stid, &subTopicName)
 		if err == nil {
 			subTopicID = &stid
 		}
@@ -253,6 +292,7 @@ func (s *PostgresStorage) SaveYoutubeVideoWithOutbox(ctx context.Context, yp mod
 		return "", fmt.Errorf("failed to insert RawYoutubeVideo: %w", err)
 	}
 
+	// Kafka OutboxEvent
 	cleanPoint := models.CleanYoutubePoint{
 		ID:             yp.ID,
 		Topic:          yp.Topic,
@@ -272,7 +312,7 @@ func (s *PostgresStorage) SaveYoutubeVideoWithOutbox(ctx context.Context, yp mod
 		DataPointID:    dataPointID,
 	}
 
-	payload, err := json.Marshal(cleanPoint)
+	kafkaPayload, err := json.Marshal(cleanPoint)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal CleanYoutubePoint: %w", err)
 	}
@@ -281,10 +321,50 @@ func (s *PostgresStorage) SaveYoutubeVideoWithOutbox(ctx context.Context, yp mod
 		`INSERT INTO "OutboxEvent"
 		 (id, "aggregateType", "aggregateId", "eventType", topic, payload, processed, "retryCount", "maxRetries", "createdAt")
 		 VALUES (gen_random_uuid(), 'youtube', $1, 'YoutubeVideoCreated', $2, $3, false, 0, 3, NOW())`,
-		dataPointID, kafkaTopic, payload,
+		dataPointID, kafkaTopic, kafkaPayload,
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to insert OutboxEvent: %w", err)
+		return "", fmt.Errorf("failed to insert Kafka OutboxEvent: %w", err)
+	}
+
+	// DataPointCreated OutboxEvent for mega_index
+	channelTitle := yp.ChannelTitle
+	megaDoc := models.MegaDocument{
+		DataPointID:    dataPointID,
+		SourceType:     "youtube",
+		FetchTimestamp: yp.FetchTimestamp.UTC().Format("2006-01-02T15:04:05Z"),
+		TopicID:        topicID,
+		TopicName:      topicName,
+		TopicSlug:      yp.Topic,
+		SubTopicID:     subTopicID,
+		SubTopicName:   subTopicName,
+		SubTopicSlug:   yp.SubTopic,
+		Title:          yp.Title,
+		Description:    nullString(yp.Description),
+		HasEnriched:    false,
+		PublishedAt:    yp.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		VideoID:        &yp.VideoID,
+		ChannelID:      &yp.ChannelID,
+		ChannelTitle:   &channelTitle,
+		ThumbnailURL:   nullString(yp.ThumbnailURL),
+		Duration:       nullString(yp.Duration),
+		ViewCount:      &yp.ViewCount,
+		LikeCount:      &yp.LikeCount,
+	}
+
+	megaPayload, err := json.Marshal(megaDoc)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal MegaDocument: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO "OutboxEvent"
+		 (id, "aggregateType", "aggregateId", "eventType", topic, payload, processed, "retryCount", "maxRetries", "createdAt")
+		 VALUES (gen_random_uuid(), 'youtube', $1, 'DataPointCreated', 'mega_index', $2, false, 0, 3, NOW())`,
+		dataPointID, megaPayload,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to insert DataPointCreated OutboxEvent: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {

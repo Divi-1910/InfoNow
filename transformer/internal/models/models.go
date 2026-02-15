@@ -110,7 +110,39 @@ const (
 	OutboxEventNewsArticleCreated  OutboxEventType = "NewsArticleCreated"
 	OutboxEventRedditPostCreated   OutboxEventType = "RedditPostCreated"
 	OutboxEventYoutubeVideoCreated OutboxEventType = "YoutubeVideoCreated"
+	OutboxEventDataPointCreated    OutboxEventType = "DataPointCreated"
 )
+
+// MegaDocument is the flat document written to mega_index in OpenSearch.
+// One document per DataPoint — no embeddings — powers the feed and search APIs.
+type MegaDocument struct {
+	DataPointID    string  `json:"data_point_id"`
+	SourceType     string  `json:"source_type"` // "news" or "youtube"
+	FetchTimestamp string  `json:"fetch_timestamp"`
+	TopicID        *int    `json:"topic_id,omitempty"`
+	TopicName      string  `json:"topic_name"`
+	TopicSlug      string  `json:"topic_slug"`
+	SubTopicID     *int    `json:"subtopic_id,omitempty"`
+	SubTopicName   string  `json:"subtopic_name"`
+	SubTopicSlug   string  `json:"subtopic_slug"`
+	Title          string  `json:"title"`
+	Description    *string `json:"description,omitempty"`
+	HasEnriched    bool    `json:"has_enriched"`
+	PublishedAt    string  `json:"published_at"`
+	// News-only fields
+	URL        *string `json:"url,omitempty"`
+	SourceName *string `json:"source_name,omitempty"`
+	Author     *string `json:"author,omitempty"`
+	ImageURL   *string `json:"image_url,omitempty"`
+	// YouTube-only fields
+	VideoID      *string `json:"video_id,omitempty"`
+	ChannelID    *string `json:"channel_id,omitempty"`
+	ChannelTitle *string `json:"channel_title,omitempty"`
+	ThumbnailURL *string `json:"thumbnail_url,omitempty"`
+	Duration     *string `json:"duration,omitempty"`
+	ViewCount    *int64  `json:"view_count,omitempty"`
+	LikeCount    *int64  `json:"like_count,omitempty"`
+}
 
 // OutboxEvent represents an event in the transactional outbox
 // Used to ensure reliable message delivery to Kafka

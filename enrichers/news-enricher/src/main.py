@@ -10,8 +10,8 @@ from .scraper import ArticleScraper
 from .chunker import HybridChunker
 from .embedder import OllamaEmbedder
 from .summarizer import OllamaSummarizer
-from .storage import PostgresStorage, OpenSearchStorage
-from .models import CleanNewsPoint, OpenSearchDocument
+from .storage import PostgresStorage, OpenSearchStorage, MegaOpenSearchStorage
+from .models import CleanNewsPoint, OpenSearchDocument, MegaDocument
 from .outbox_publisher import OutboxPublisher
 
 # Configure logging
@@ -63,10 +63,13 @@ class NewsEnricher:
         )
         self.opensearch.create_index_if_not_exists()
 
+        self.mega_opensearch = MegaOpenSearchStorage(url=settings.opensearch_url)
+
         # Initialize outbox publisher for reliable OpenSearch indexing
         self.outbox_publisher = OutboxPublisher(
             database_url=settings.database_url,
             opensearch=self.opensearch,
+            mega_opensearch=self.mega_opensearch,
             poll_interval=settings.outbox_poll_interval,
             batch_size=settings.outbox_batch_size,
             max_retries=settings.outbox_max_retries,
@@ -115,18 +118,40 @@ class NewsEnricher:
                 logger.warning(f"No valid embeddings for {article.url}")
                 return False
 
-            # Build OpenSearch documents for outbox
+            # Look up topic/subtopic IDs and names by slug
+            topic_id, topic_name, subtopic_id, subtopic_name = self.postgres.get_topic_by_slug(
+                article.topic, article.subtopic
+            )
+
+            # Step 4: Generate summary
+            summary = await asyncio.to_thread(
+                self.summarizer.summarize,
+                article.title,
+                full_content,
+                settings.summary_input_max_chars,
+            )
+
+            # Build OpenSearch chunk documents for news_index outbox
             os_documents = [
                 OpenSearchDocument(
                     data_id=article.id,
                     data_point_id=article.data_point_id,
                     source_type="news",
-                    topic=article.topic,
-                    subtopic=article.subtopic,
+                    topic_id=topic_id,
+                    topic_name=topic_name,
+                    topic_slug=article.topic,
+                    subtopic_id=subtopic_id,
+                    subtopic_name=subtopic_name,
+                    subtopic_slug=article.subtopic,
                     title=article.title,
+                    description=article.description,
                     url=article.url,
                     source_name=article.source_name,
+                    author=article.author,
+                    image_url=article.image_url,
                     published_at=article.published_at,
+                    fetch_timestamp=article.fetch_timestamp,
+                    summary=summary,
                     chunk_index=chunk.index,
                     content=chunk.content,
                     embedding=embedding,
@@ -134,14 +159,30 @@ class NewsEnricher:
                 for chunk, embedding in zip(valid_chunks, valid_embeddings)
             ]
 
-            # Step 4: Save to PostgreSQL + create OutboxEvent (single transaction)
-            # The outbox publisher will handle OpenSearch indexing asynchronously
-            summary = await asyncio.to_thread(
-                self.summarizer.summarize,
-                article.title,
-                full_content,
-                settings.summary_input_max_chars,
+            # Build MegaDocument for mega_index upsert
+            mega_doc = MegaDocument(
+                data_point_id=article.data_point_id,
+                source_type="news",
+                fetch_timestamp=article.fetch_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                topic_id=topic_id,
+                topic_name=topic_name,
+                topic_slug=article.topic,
+                subtopic_id=subtopic_id,
+                subtopic_name=subtopic_name,
+                subtopic_slug=article.subtopic,
+                title=article.title,
+                description=article.description,
+                summary=summary,
+                has_enriched=True,
+                published_at=article.published_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                url=article.url,
+                source_name=article.source_name,
+                author=article.author,
+                image_url=article.image_url,
             )
+
+            # Step 5: Save to PostgreSQL + create OutboxEvents (single transaction)
+            # The outbox publisher will handle OpenSearch indexing asynchronously
             self.postgres.save_enriched_article(
                 data_point_id=article.data_point_id,
                 full_content=full_content,
@@ -150,6 +191,7 @@ class NewsEnricher:
                 embeddings=valid_embeddings,
                 opensearch_documents=os_documents,
                 opensearch_index=settings.opensearch_index,
+                mega_document=mega_doc,
             )
 
             logger.info(
@@ -197,6 +239,7 @@ class NewsEnricher:
         self.consumer.close()
         self.postgres.close()
         self.opensearch.close()
+        self.mega_opensearch.close()
         logger.info("Shutdown complete")
 
 

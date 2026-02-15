@@ -125,3 +125,29 @@ export const getFeedItem = async (id: string): Promise<FeedItem> => {
   const response = await axiosInstance.get<FeedItem>(`/api/feed/${id}`);
   return response.data;
 };
+
+export interface SearchParams {
+  q: string;
+  type?: DataType;
+  topicId?: number;
+  subTopicId?: number;
+  limit?: number;
+}
+
+export interface SearchResponse {
+  items: FeedItem[];
+}
+
+/**
+ * Search feed items via the backend OpenSearch API
+ */
+export const searchFeed = async (
+  params: SearchParams,
+  signal?: AbortSignal
+): Promise<SearchResponse> => {
+  const response = await axiosInstance.get<SearchResponse>("/api/search", {
+    params,
+    signal,
+  });
+  return response.data;
+};

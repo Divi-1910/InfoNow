@@ -2,12 +2,12 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import psycopg2
 from psycopg2.extras import execute_values
 
-from ..models import Chunk, OpenSearchDocument
+from ..models import Chunk, OpenSearchDocument, MegaDocument
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,42 @@ class PostgresStorage:
             logger.error("Error checking youtube enrichment status: %s", exc)
             return False
 
+    def get_topic_by_slug(
+        self, topic_slug: str, subtopic_slug: str
+    ) -> Tuple[Optional[int], str, Optional[int], str]:
+        """
+        Look up topic and subtopic IDs/names by slug.
+        Returns (topic_id, topic_name, subtopic_id, subtopic_name).
+        """
+        topic_id: Optional[int] = None
+        topic_name: str = ""
+        subtopic_id: Optional[int] = None
+        subtopic_name: str = ""
+
+        try:
+            with self.conn.cursor() as cur:
+                if topic_slug:
+                    cur.execute(
+                        'SELECT id, name FROM "Topic" WHERE slug = %s',
+                        (topic_slug,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        topic_id, topic_name = row[0], row[1]
+
+                if subtopic_slug:
+                    cur.execute(
+                        'SELECT id, name FROM "SubTopic" WHERE slug = %s',
+                        (subtopic_slug,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        subtopic_id, subtopic_name = row[0], row[1]
+        except Exception as e:
+            logger.warning("Failed to look up topic slugs: %s", e)
+
+        return topic_id, topic_name, subtopic_id, subtopic_name
+
     def save_enriched_video(
         self,
         data_point_id: str,
@@ -51,7 +87,14 @@ class PostgresStorage:
         embeddings: List[List[float]],
         opensearch_documents: Optional[List[OpenSearchDocument]] = None,
         opensearch_index: Optional[str] = None,
+        mega_document: Optional[MegaDocument] = None,
     ) -> str:
+        """
+        Save enriched video, chunks, and outbox events in a single transaction.
+        Emits:
+        - YoutubeVideoEnriched OutboxEvent (chunks → yt_index)
+        - YoutubeVideoEnrichedMega OutboxEvent (mega doc → mega_index upsert)
+        """
         try:
             with self.conn.cursor() as cur:
                 cur.execute(
@@ -86,6 +129,7 @@ class PostgresStorage:
                         template="(gen_random_uuid(), %s, %s, %s, %s, %s)",
                     )
 
+                # OutboxEvent for yt_index chunk indexing
                 if opensearch_documents and opensearch_index:
                     payload = {
                         "documents": [doc.model_dump(mode="json") for doc in opensearch_documents]
@@ -97,6 +141,18 @@ class PostgresStorage:
                         VALUES (%s, 'enriched_youtube', %s, 'YoutubeVideoEnriched', %s, %s, false, 0, 3, NOW())
                         """,
                         (str(uuid.uuid4()), data_point_id, opensearch_index, json.dumps(payload)),
+                    )
+
+                # OutboxEvent for mega_index upsert
+                if mega_document is not None:
+                    mega_payload = mega_document.model_dump(mode="json")
+                    cur.execute(
+                        """
+                        INSERT INTO "OutboxEvent"
+                        (id, "aggregateType", "aggregateId", "eventType", topic, payload, processed, "retryCount", "maxRetries", "createdAt")
+                        VALUES (%s, 'enriched_youtube', %s, 'YoutubeVideoEnrichedMega', 'mega_index', %s, false, 0, 3, NOW())
+                        """,
+                        (str(uuid.uuid4()), data_point_id, json.dumps(mega_payload)),
                     )
 
                 self.conn.commit()

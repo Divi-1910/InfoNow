@@ -27,6 +27,9 @@ type Config struct {
 	OutboxPollInterval time.Duration
 	OutboxBatchSize    int
 	OutboxMaxRetries   int
+
+	// OpenSearch settings (for mega_index writes)
+	OpenSearchURL string
 }
 
 func LoadConfig() *Config {
@@ -80,6 +83,8 @@ func LoadConfig() *Config {
 		OutboxPollInterval: outboxPollInterval,
 		OutboxBatchSize:    outboxBatchSize,
 		OutboxMaxRetries:   outboxMaxRetries,
+
+		OpenSearchURL: getEnv("OPENSEARCH_URL", "http://localhost:9200"),
 	}
 
 	if cfg.DatabaseURL == "" {

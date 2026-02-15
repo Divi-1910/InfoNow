@@ -1,10 +1,9 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAtom } from "jotai";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, X, Newspaper, MessageSquare, Play } from "lucide-react";
-import { feedItemsAtom } from "@/store/feedAtom";
+import { Search, Newspaper, MessageSquare, Play, Loader2 } from "lucide-react";
 import { readerItemIdAtom } from "@/store/readerAtom";
-import { isNewsContent, isRedditContent, isYoutubeContent } from "@/api/feed";
+import { isNewsContent, isRedditContent, isYoutubeContent, searchFeed } from "@/api/feed";
 import type { FeedItem } from "@/api/feed";
 
 interface SearchModalProps {
@@ -51,14 +50,20 @@ const TypeIcon = ({ type }: { type: FeedItem["type"] }) => {
 
 export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
   const [query, setQuery] = useState("");
-  const [feedItems] = useAtom(feedItemsAtom);
+  const [results, setResults] = useState<FeedItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [, setReaderItemId] = useAtom(readerItemIdAtom);
   const inputRef = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setQuery("");
+      setResults([]);
       setTimeout(() => inputRef.current?.focus(), 100);
+    } else {
+      abortRef.current?.abort();
     }
   }, [isOpen]);
 
@@ -75,16 +80,33 @@ export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
     };
   }, [isOpen, onClose]);
 
-  const results = useMemo(() => {
-    if (!query.trim()) return [];
-    const q = query.toLowerCase();
-    return feedItems.filter((item) => {
-      const title = getTitle(item).toLowerCase();
-      const source = getSource(item).toLowerCase();
-      const topic = item.topic?.name?.toLowerCase() || "";
-      return title.includes(q) || source.includes(q) || topic.includes(q);
-    }).slice(0, 12);
-  }, [query, feedItems]);
+  useEffect(() => {
+    if (!query.trim()) {
+      setResults([]);
+      return;
+    }
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      // Cancel any in-flight request
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
+      setIsLoading(true);
+      try {
+        const res = await searchFeed({ q: query, limit: 12 }, abortRef.current.signal);
+        setResults(res.items);
+      } catch {
+        setResults([]);
+      } finally {
+        setIsLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      abortRef.current?.abort();
+    };
+  }, [query]);
 
   const handleSelect = (item: FeedItem) => {
     if (item.enriched?.hasFullContent || isYoutubeContent(item.content)) {
@@ -131,13 +153,19 @@ export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
 
             {/* Results */}
             <div className="max-h-[50vh] overflow-y-auto">
-              {query.trim() && results.length === 0 && (
+              {isLoading && (
+                <div className="px-5 py-8 flex justify-center">
+                  <Loader2 className="w-5 h-5 text-gray-500 animate-spin" />
+                </div>
+              )}
+
+              {!isLoading && query.trim() && results.length === 0 && (
                 <div className="px-5 py-8 text-center text-sm text-gray-500 font-light">
                   No results for "{query}"
                 </div>
               )}
 
-              {results.map((item) => (
+              {!isLoading && results.map((item) => (
                 <button
                   key={item.id}
                   type="button"
@@ -159,9 +187,9 @@ export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
                 </button>
               ))}
 
-              {!query.trim() && (
+              {!isLoading && !query.trim() && (
                 <div className="px-5 py-8 text-center text-sm text-gray-600 font-light">
-                  Type to search across your feed
+                  Type to search articles and videos
                 </div>
               )}
             </div>

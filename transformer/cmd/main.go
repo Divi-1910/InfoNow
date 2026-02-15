@@ -68,6 +68,15 @@ func main() {
 	log.Printf("Outbox publisher initialized (interval=%v, batch=%d, maxRetries=%d)",
 		cfg.OutboxPollInterval, cfg.OutboxBatchSize, cfg.OutboxMaxRetries)
 
+	megaPublisher := outbox.NewMegaPublisher(
+		store.DB(),
+		cfg.OpenSearchURL,
+		cfg.OutboxPollInterval,
+		cfg.OutboxBatchSize,
+		cfg.OutboxMaxRetries,
+	)
+	log.Printf("Mega publisher initialized (opensearch=%s)", cfg.OpenSearchURL)
+
 	newsProcessor := processor.NewNewsProcessor()
 	ytProcessor := processor.NewYouTubeProcessor()
 	dlqProducer := dlq.NewProducer(cfg.KafkaBrokers)
@@ -86,6 +95,7 @@ func main() {
 	}()
 
 	go outboxPublisher.Start(ctx)
+	go megaPublisher.Start(ctx)
 
 	log.Println("Starting message processing loops")
 	var wg sync.WaitGroup

@@ -1,4 +1,4 @@
 from .postgres import PostgresStorage
-from .opensearch import OpenSearchStorage
+from .opensearch import OpenSearchStorage, MegaOpenSearchStorage
 
-__all__ = ["PostgresStorage", "OpenSearchStorage"]
+__all__ = ["PostgresStorage", "OpenSearchStorage", "MegaOpenSearchStorage"]
