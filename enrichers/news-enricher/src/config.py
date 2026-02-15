@@ -18,7 +18,9 @@ class Settings(BaseSettings):
     # Ollama settings
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "nomic-embed-text"
+    ollama_summary_model: str = "llama3.2"
     embedding_dimension: int = 768
+    summary_input_max_chars: int = 12000
 
     # Processing settings
     max_chunk_tokens: int = 512

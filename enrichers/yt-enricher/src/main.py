@@ -7,6 +7,7 @@ from .chunker import HybridChunker
 from .config import settings
 from .consumer import KafkaConsumer
 from .embedder import OllamaEmbedder
+from .summarizer import OllamaSummarizer
 from .models import CleanYoutubePoint, OpenSearchDocument
 from .outbox_publisher import OutboxPublisher
 from .storage import OpenSearchStorage, PostgresStorage
@@ -32,6 +33,10 @@ class YouTubeEnricher:
         self.transcript_fetcher = TranscriptFetcher()
         self.chunker = HybridChunker(max_tokens=settings.max_chunk_tokens)
         self.embedder = OllamaEmbedder(model=settings.ollama_model, host=settings.ollama_url)
+        self.summarizer = OllamaSummarizer(
+            model=settings.ollama_summary_model,
+            host=settings.ollama_url,
+        )
 
         self.postgres = PostgresStorage(settings.database_url)
         self.postgres.connect()
@@ -102,10 +107,17 @@ class YouTubeEnricher:
                 for chunk, embedding in zip(valid_chunks, valid_embeddings)
             ]
 
+            summary = await asyncio.to_thread(
+                self.summarizer.summarize,
+                video.title,
+                transcript,
+                settings.summary_input_max_chars,
+            )
+
             self.postgres.save_enriched_video(
                 data_point_id=video.data_point_id,
                 transcript=transcript,
-                summary=None,
+                summary=summary,
                 chunks=valid_chunks,
                 embeddings=valid_embeddings,
                 opensearch_documents=docs,

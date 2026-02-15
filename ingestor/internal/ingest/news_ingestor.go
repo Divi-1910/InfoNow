@@ -8,6 +8,7 @@ import (
 	"ingestor/internal/producer"
 	"ingestor/internal/runner"
 	"log"
+	"time"
 )
 
 type NewsIngestor struct {
@@ -15,6 +16,8 @@ type NewsIngestor struct {
 	newsClient    *client.MultiNewsClient
 	deduper       *deduper.Deduper
 	producer      *producer.KafkaProducer
+	maxPerTopic   int
+	opTimeout     time.Duration
 }
 
 func NewNewsIngestor(
@@ -22,12 +25,16 @@ func NewNewsIngestor(
 	news *client.MultiNewsClient,
 	dup *deduper.Deduper,
 	prod *producer.KafkaProducer,
+	maxPerTopic int,
+	opTimeout time.Duration,
 ) *NewsIngestor {
 	return &NewsIngestor{
 		backendClient: backend,
 		newsClient:    news,
 		deduper:       dup,
 		producer:      prod,
+		maxPerTopic:   maxPerTopic,
+		opTimeout:     opTimeout,
 	}
 }
 
@@ -48,6 +55,11 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 	firstFew := 0
 
 	for _, topic := range topics {
+		if err := ctx.Err(); err != nil {
+			log.Printf("Stopping news ingestion early: %v", err)
+			return
+		}
+
 		if len(topic.SubTopics) == 0 {
 			continue
 		}
@@ -57,7 +69,13 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 
 		log.Printf("Topic %s: fetched %d articles", topic.Slug, len(subTopicArticles))
 
+		processedInTopic := 0
 		for _, item := range subTopicArticles {
+			if n.maxPerTopic > 0 && processedInTopic >= n.maxPerTopic {
+				log.Printf("Topic %s: reached cap (%d), moving to next topic", topic.Slug, n.maxPerTopic)
+				break
+			}
+
 			article := item.Article
 			dataID, err := identity.NewsDataID(article.URL)
 			if err != nil {
@@ -65,7 +83,9 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 				continue
 			}
 
-			dup, err := n.deduper.IsDuplicate(ctx, dataID)
+			opCtx, cancel := context.WithTimeout(ctx, n.opTimeout)
+			dup, err := n.deduper.IsDuplicate(opCtx, dataID)
+			cancel()
 			if err != nil {
 				log.Printf("Deduper failed for %s, skipping: %v", dataID, err)
 				continue
@@ -87,12 +107,19 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 				continue
 			}
 
-			if err := n.producer.PublishNews(ctx, np); err != nil {
+			opCtx, cancel = context.WithTimeout(ctx, n.opTimeout)
+			if err := n.producer.PublishNews(opCtx, np); err != nil {
+				cancel()
 				log.Printf("Failed to publish %s: %v", np.ID, err)
 				continue
 			}
+			cancel()
 
 			totalPublished++
+			processedInTopic++
+			if processedInTopic%50 == 0 {
+				log.Printf("Topic %s progress: processed=%d published=%d", topic.Slug, processedInTopic, totalPublished)
+			}
 		}
 	}
 

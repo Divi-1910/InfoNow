@@ -29,7 +29,14 @@ func main() {
 	kafkaProducer := producer.NewKafkaProducer(cfg.KafkaBrokers)
 	defer kafkaProducer.Close()
 
-	newsIngestor := ingest.NewNewsIngestor(backendClient, newsClient, dup, kafkaProducer)
+	newsIngestor := ingest.NewNewsIngestor(
+		backendClient,
+		newsClient,
+		dup,
+		kafkaProducer,
+		cfg.NewsMaxPerTopic,
+		cfg.OperationTimeout,
+	)
 	ytIngestor := ingest.NewYTIngestor(backendClient, ytClient, dup, kafkaProducer)
 
 	ctx := context.Background()

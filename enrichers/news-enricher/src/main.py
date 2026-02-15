@@ -9,6 +9,7 @@ from .consumer import KafkaConsumer
 from .scraper import ArticleScraper
 from .chunker import HybridChunker
 from .embedder import OllamaEmbedder
+from .summarizer import OllamaSummarizer
 from .storage import PostgresStorage, OpenSearchStorage
 from .models import CleanNewsPoint, OpenSearchDocument
 from .outbox_publisher import OutboxPublisher
@@ -45,6 +46,10 @@ class NewsEnricher:
 
         self.embedder = OllamaEmbedder(
             model=settings.ollama_model,
+            host=settings.ollama_url,
+        )
+        self.summarizer = OllamaSummarizer(
+            model=settings.ollama_summary_model,
             host=settings.ollama_url,
         )
 
@@ -131,10 +136,16 @@ class NewsEnricher:
 
             # Step 4: Save to PostgreSQL + create OutboxEvent (single transaction)
             # The outbox publisher will handle OpenSearch indexing asynchronously
+            summary = await asyncio.to_thread(
+                self.summarizer.summarize,
+                article.title,
+                full_content,
+                settings.summary_input_max_chars,
+            )
             self.postgres.save_enriched_article(
                 data_point_id=article.data_point_id,
                 full_content=full_content,
-                summary=None,  # TODO: Add summarization
+                summary=summary,
                 chunks=valid_chunks,
                 embeddings=valid_embeddings,
                 opensearch_documents=os_documents,

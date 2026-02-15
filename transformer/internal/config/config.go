@@ -72,7 +72,7 @@ func LoadConfig() *Config {
 		YouTubeOutputTopic:   getEnv("KAFKA_YT_OUTPUT_TOPIC", "process.yt.clean"),
 		NewsDLQTopic:         getEnv("KAFKA_NEWS_DLQ_TOPIC", "transformer.news.dlq"),
 		YouTubeDLQTopic:      getEnv("KAFKA_YT_DLQ_TOPIC", "transformer.yt.dlq"),
-		DatabaseURL:          getEnv("DATABASE_URL", "postgresql://Divyansh:dabadebadeba@localhost:6432/info_now_db"),
+		DatabaseURL:          getEnv("DATABASE_URL", "postgresql://Divyansh:dabadebadeba@localhost:6432/info_now_db?sslmode=disable"),
 		BatchSize:            batchSize,
 		ProcessingWorkers:    processingWorkers,
 		ProcessingMaxRetries: processingMaxRetries,

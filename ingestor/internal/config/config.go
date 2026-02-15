@@ -22,6 +22,8 @@ type Config struct {
 	RedisDB           int
 	KafkaBrokers      []string
 	YouTubeMaxResults int
+	NewsMaxPerTopic   int
+	OperationTimeout  time.Duration
 }
 
 func LoadConfig() *Config {
@@ -37,6 +39,8 @@ func LoadConfig() *Config {
 	viper.SetDefault("REDIS_DB", 0)
 	viper.SetDefault("KAFKA_BROKERS", "localhost:9092")
 	viper.SetDefault("YOUTUBE_MAX_RESULTS", 10)
+	viper.SetDefault("NEWS_MAX_PER_TOPIC", 200)
+	viper.SetDefault("INGEST_OPERATION_TIMEOUT_SECONDS", 5)
 
 	if !viper.IsSet("NEWSAPI_KEY_1") {
 		log.Fatal("NEWSAPI KEY 1 MISSING")
@@ -70,6 +74,14 @@ func LoadConfig() *Config {
 	if youtubeMaxResults <= 0 || youtubeMaxResults > 50 {
 		youtubeMaxResults = 10
 	}
+	newsMaxPerTopic := viper.GetInt("NEWS_MAX_PER_TOPIC")
+	if newsMaxPerTopic <= 0 {
+		newsMaxPerTopic = 200
+	}
+	operationTimeoutSec := viper.GetInt("INGEST_OPERATION_TIMEOUT_SECONDS")
+	if operationTimeoutSec <= 0 {
+		operationTimeoutSec = 5
+	}
 
 	config := &Config{
 		NewsAPIKey1:       viper.GetString("NEWSAPI_KEY_1"),
@@ -84,6 +96,8 @@ func LoadConfig() *Config {
 		RedisDB:           redisDB,
 		KafkaBrokers:      strings.Split(viper.GetString("KAFKA_BROKERS"), ","),
 		YouTubeMaxResults: youtubeMaxResults,
+		NewsMaxPerTopic:   newsMaxPerTopic,
+		OperationTimeout:  time.Duration(operationTimeoutSec) * time.Second,
 	}
 
 	return config
