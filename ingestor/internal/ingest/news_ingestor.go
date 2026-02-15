@@ -2,9 +2,11 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"ingestor/internal/client"
 	"ingestor/internal/deduper"
 	"ingestor/internal/identity"
+	"ingestor/internal/models"
 	"ingestor/internal/producer"
 	"ingestor/internal/runner"
 	"log"
@@ -40,24 +42,24 @@ func NewNewsIngestor(
 
 func (n *NewsIngestor) Run(ctx context.Context) {
 	log.Println("Starting news ingestion cycle")
-
 	topics, err := n.backendClient.GetAllTopics(ctx)
 	if err != nil {
 		log.Printf("Failed to fetch topics: %v", err)
 		return
 	}
+	_ = n.RunWithTopics(ctx, topics)
+}
 
+// RunWithTopics executes a news ingestion cycle for the given topics.
+func (n *NewsIngestor) RunWithTopics(ctx context.Context, topics []models.Topic) CycleStats {
+	stats := CycleStats{Topics: len(topics)}
 	log.Printf("Fetched %d topics", len(topics))
 
-	totalFetched := 0
-	totalDeduped := 0
-	totalPublished := 0
 	firstFew := 0
-
 	for _, topic := range topics {
 		if err := ctx.Err(); err != nil {
 			log.Printf("Stopping news ingestion early: %v", err)
-			return
+			return stats
 		}
 
 		if len(topic.SubTopics) == 0 {
@@ -65,8 +67,7 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 		}
 
 		subTopicArticles := n.newsClient.GetArticles(ctx, topic.SubTopics)
-		totalFetched += len(subTopicArticles)
-
+		stats.Fetched += len(subTopicArticles)
 		log.Printf("Topic %s: fetched %d articles", topic.Slug, len(subTopicArticles))
 
 		processedInTopic := 0
@@ -92,7 +93,7 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 			}
 
 			if dup {
-				totalDeduped++
+				stats.Deduped++
 				continue
 			}
 
@@ -115,13 +116,29 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 			}
 			cancel()
 
-			totalPublished++
+			stats.Published++
 			processedInTopic++
 			if processedInTopic%50 == 0 {
-				log.Printf("Topic %s progress: processed=%d published=%d", topic.Slug, processedInTopic, totalPublished)
+				log.Printf("Topic %s progress: processed=%d published=%d", topic.Slug, processedInTopic, stats.Published)
 			}
 		}
 	}
 
-	log.Printf("News ingestion cycle complete: fetched=%d deduped=%d published=%d", totalFetched, totalDeduped, totalPublished)
+	log.Printf(
+		"News ingestion cycle complete: fetched=%d deduped=%d published=%d",
+		stats.Fetched,
+		stats.Deduped,
+		stats.Published,
+	)
+	return stats
+}
+
+// RunAll fetches backend topics and executes a single cycle.
+func (n *NewsIngestor) RunAll(ctx context.Context) (CycleStats, error) {
+	log.Println("Starting news ingestion cycle")
+	topics, err := n.backendClient.GetAllTopics(ctx)
+	if err != nil {
+		return CycleStats{}, fmt.Errorf("fetch topics: %w", err)
+	}
+	return n.RunWithTopics(ctx, topics), nil
 }

@@ -16,6 +16,9 @@ type Config struct {
 	YouTubeAPIKey     string
 	ScheduledInterval time.Duration
 	ServerPort        string
+	APIKey            string
+	APIRateLimit      int
+	APIJobTimeout     time.Duration
 	BackendURL        string
 	RedisAddr         string
 	RedisPassword     string
@@ -33,6 +36,9 @@ func LoadConfig() *Config {
 	viper.ReadInConfig()
 
 	viper.SetDefault("INGESTOR_PORT", "7575")
+	viper.SetDefault("INGESTOR_API_KEY", "")
+	viper.SetDefault("INGESTOR_API_RATE_LIMIT_PER_MINUTE", 30)
+	viper.SetDefault("INGESTOR_API_JOB_TIMEOUT_SECONDS", 1800)
 	viper.SetDefault("SCHEDULED_INTERVAL_IN_HOURS", 4)
 	viper.SetDefault("REDIS_ADDR", "localhost:6379")
 	viper.SetDefault("REDIS_PASSWORD", "")
@@ -82,6 +88,14 @@ func LoadConfig() *Config {
 	if operationTimeoutSec <= 0 {
 		operationTimeoutSec = 5
 	}
+	apiRateLimit := viper.GetInt("INGESTOR_API_RATE_LIMIT_PER_MINUTE")
+	if apiRateLimit <= 0 {
+		apiRateLimit = 30
+	}
+	apiJobTimeoutSec := viper.GetInt("INGESTOR_API_JOB_TIMEOUT_SECONDS")
+	if apiJobTimeoutSec <= 0 {
+		apiJobTimeoutSec = 1800
+	}
 
 	config := &Config{
 		NewsAPIKey1:       viper.GetString("NEWSAPI_KEY_1"),
@@ -90,6 +104,9 @@ func LoadConfig() *Config {
 		YouTubeAPIKey:     viper.GetString("YOUTUBE_API_KEY"),
 		ScheduledInterval: time.Duration(intervalHours) * time.Hour,
 		ServerPort:        viper.GetString("INGESTOR_PORT"),
+		APIKey:            viper.GetString("INGESTOR_API_KEY"),
+		APIRateLimit:      apiRateLimit,
+		APIJobTimeout:     time.Duration(apiJobTimeoutSec) * time.Second,
 		BackendURL:        viper.GetString("BACKEND_URL"),
 		RedisAddr:         viper.GetString("REDIS_ADDR"),
 		RedisPassword:     viper.GetString("REDIS_PASSWORD"),
