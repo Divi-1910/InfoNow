@@ -195,6 +195,7 @@ feedRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Respon
           publishedAt: dp.rawYoutube.publishedAt,
           viewCount: Number(dp.rawYoutube.viewCount),
           likeCount: Number(dp.rawYoutube.likeCount),
+          duration: dp.rawYoutube.duration,
         };
       }
 
@@ -225,6 +226,107 @@ feedRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Respon
   } catch (error) {
     logger.error("Feed fetch error:", error);
     return res.status(500).json({ message: "Failed to fetch feed" });
+  }
+});
+
+/**
+ * GET /api/feed/:id
+ * Returns a single feed item with full enriched content
+ */
+feedRouter.get("/:id", optionalAuthMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const dp = await prisma.dataPoint.findUnique({
+      where: { id: req.params.id },
+      include: {
+        topic: { select: { id: true, name: true, slug: true } },
+        subTopic: { select: { id: true, name: true, slug: true } },
+        rawNews: true,
+        rawReddit: true,
+        rawYoutube: true,
+        enrichedNews: true,
+        enrichedYoutube: true,
+      },
+    });
+
+    if (!dp) {
+      return res.status(404).json({ message: "Item not found" });
+    }
+
+    let content: any = null;
+    if (dp.type === "News" && dp.rawNews) {
+      content = {
+        title: dp.rawNews.title,
+        url: dp.rawNews.url,
+        description: dp.rawNews.description,
+        publishedAt: dp.rawNews.publishedAt,
+        sourceName: dp.rawNews.sourceName,
+        author: dp.rawNews.author,
+        imageUrl: dp.rawNews.imageUrl,
+      };
+    } else if (dp.type === "Reddit" && dp.rawReddit) {
+      content = {
+        postId: dp.rawReddit.postId,
+        subreddit: dp.rawReddit.subreddit,
+        title: dp.rawReddit.title,
+        selftext: dp.rawReddit.selftext,
+        author: dp.rawReddit.author,
+        score: dp.rawReddit.score,
+        numComments: dp.rawReddit.numComments,
+        permalink: dp.rawReddit.permalink,
+        createdUtc: dp.rawReddit.createdUtc,
+        thumbnail: dp.rawReddit.thumbnail,
+      };
+    } else if (dp.type === "Youtube" && dp.rawYoutube) {
+      content = {
+        videoId: dp.rawYoutube.videoId,
+        channelId: dp.rawYoutube.channelId,
+        channelTitle: dp.rawYoutube.channelTitle,
+        title: dp.rawYoutube.title,
+        description: dp.rawYoutube.description,
+        thumbnailUrl: dp.rawYoutube.thumbnailUrl,
+        publishedAt: dp.rawYoutube.publishedAt,
+        viewCount: Number(dp.rawYoutube.viewCount),
+        likeCount: Number(dp.rawYoutube.likeCount),
+        duration: dp.rawYoutube.duration,
+      };
+    }
+
+    let isSaved = false;
+    if (req.user) {
+      const saved = await prisma.savedItem.findUnique({
+        where: { userId_dataPointId: { userId: req.user.userId, dataPointId: dp.id } },
+      });
+      isSaved = !!saved;
+    }
+
+    let enriched = undefined;
+    if (dp.enrichedNews) {
+      enriched = {
+        summary: dp.enrichedNews.summary,
+        fullContent: dp.enrichedNews.fullContent,
+        hasFullContent: true,
+      };
+    } else if (dp.enrichedYoutube) {
+      enriched = {
+        summary: dp.enrichedYoutube.summary,
+        fullContent: dp.enrichedYoutube.transcript,
+        hasFullContent: true,
+      };
+    }
+
+    return res.status(200).json({
+      id: dp.id,
+      type: dp.type,
+      fetchedAt: dp.fetchedAt.toISOString(),
+      topic: dp.topic,
+      subTopic: dp.subTopic,
+      content,
+      enriched,
+      isSaved,
+    });
+  } catch (error) {
+    logger.error("Feed item fetch error:", error);
+    return res.status(500).json({ message: "Failed to fetch item" });
   }
 });
 

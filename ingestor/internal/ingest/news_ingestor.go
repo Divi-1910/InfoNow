@@ -32,7 +32,7 @@ func NewNewsIngestor(
 }
 
 func (n *NewsIngestor) Run(ctx context.Context) {
-	log.Println("Starting ingestion cycle")
+	log.Println("Starting news ingestion cycle")
 
 	topics, err := n.backendClient.GetAllTopics(ctx)
 	if err != nil {
@@ -52,12 +52,13 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 			continue
 		}
 
-		articles := n.newsClient.GetArticles(ctx, topic.SubTopics)
-		totalFetched += len(articles)
+		subTopicArticles := n.newsClient.GetArticles(ctx, topic.SubTopics)
+		totalFetched += len(subTopicArticles)
 
-		log.Printf("Topic %s: fetched %d articles", topic.Slug, len(articles))
+		log.Printf("Topic %s: fetched %d articles", topic.Slug, len(subTopicArticles))
 
-		for _, article := range articles {
+		for _, item := range subTopicArticles {
+			article := item.Article
 			dataID, err := identity.NewsDataID(article.URL)
 			if err != nil {
 				log.Printf("Failed to generate data_id for %s: %v", article.URL, err)
@@ -80,7 +81,7 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 				firstFew++
 			}
 
-			np, err := runner.ConvertArticleToNewsPoint(article, topic.Slug, "")
+			np, err := runner.ConvertArticleToNewsPoint(article, topic.Slug, item.SubTopic.Slug)
 			if err != nil {
 				log.Printf("Failed to convert article: %v", err)
 				continue
@@ -95,5 +96,5 @@ func (n *NewsIngestor) Run(ctx context.Context) {
 		}
 	}
 
-	log.Printf("Ingestion cycle complete: fetched=%d deduped=%d published=%d", totalFetched, totalDeduped, totalPublished)
+	log.Printf("News ingestion cycle complete: fetched=%d deduped=%d published=%d", totalFetched, totalDeduped, totalPublished)
 }

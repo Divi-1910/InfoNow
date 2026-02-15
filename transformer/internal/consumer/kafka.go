@@ -26,6 +26,36 @@ func NewKafkaConsumer(brokers []string, topic, groupID string) *KafkaConsumer {
 	}
 }
 
+// FetchOneNews fetches one news message from Kafka without committing it.
+func (c *KafkaConsumer) FetchOneNews(ctx context.Context) (models.NewsPoint, kafka.Message, error) {
+	msg, err := c.reader.FetchMessage(ctx)
+	if err != nil {
+		return models.NewsPoint{}, kafka.Message{}, err
+	}
+
+	var np models.NewsPoint
+	if err := json.Unmarshal(msg.Value, &np); err != nil {
+		return models.NewsPoint{}, msg, err
+	}
+
+	return np, msg, nil
+}
+
+// FetchOneYouTube fetches one youtube message from Kafka without committing it.
+func (c *KafkaConsumer) FetchOneYouTube(ctx context.Context) (models.YoutubePoint, kafka.Message, error) {
+	msg, err := c.reader.FetchMessage(ctx)
+	if err != nil {
+		return models.YoutubePoint{}, kafka.Message{}, err
+	}
+
+	var yp models.YoutubePoint
+	if err := json.Unmarshal(msg.Value, &yp); err != nil {
+		return models.YoutubePoint{}, msg, err
+	}
+
+	return yp, msg, nil
+}
+
 // FetchBatch fetches up to batchSize messages from Kafka
 func (c *KafkaConsumer) FetchBatch(ctx context.Context, batchSize int) ([]models.NewsPoint, []kafka.Message, error) {
 	var newsPoints []models.NewsPoint
@@ -60,6 +90,39 @@ func (c *KafkaConsumer) FetchBatch(ctx context.Context, batchSize int) ([]models
 	}
 
 	return newsPoints, messages, nil
+}
+
+// FetchYouTubeBatch fetches up to batchSize YouTube messages from Kafka
+func (c *KafkaConsumer) FetchYouTubeBatch(ctx context.Context, batchSize int) ([]models.YoutubePoint, []kafka.Message, error) {
+	var ytPoints []models.YoutubePoint
+	var messages []kafka.Message
+
+	for i := 0; i < batchSize; i++ {
+		msg, err := c.reader.FetchMessage(ctx)
+		if err != nil {
+			if err == context.DeadlineExceeded || err == context.Canceled {
+				break
+			}
+			if len(messages) > 0 {
+				break
+			}
+			return nil, nil, err
+		}
+
+		var yp models.YoutubePoint
+		if err := json.Unmarshal(msg.Value, &yp); err != nil {
+			log.Printf("Failed to unmarshal youtube message: %v", err)
+			if commitErr := c.reader.CommitMessages(ctx, msg); commitErr != nil {
+				log.Printf("Failed to commit bad youtube message: %v", commitErr)
+			}
+			continue
+		}
+
+		ytPoints = append(ytPoints, yp)
+		messages = append(messages, msg)
+	}
+
+	return ytPoints, messages, nil
 }
 
 // CommitMessages commits the processed messages

@@ -9,12 +9,14 @@ import {
   savedLoadingAtom,
   savedLoadingMoreAtom,
   savedErrorAtom,
-  savedIdsAtom,
   toggleSavedIdAtom,
 } from "../store/savedAtom";
 import { getSavedItems, unsaveItem } from "../api/saved";
 import { userAtom } from "../store/userAtom";
 import FeedCard from "./FeedCard";
+import FeedCardSkeleton from "./FeedCardSkeleton";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { useToast } from "@/hooks/useToast";
 
 export const SavedContent = () => {
   const [items, setItems] = useAtom(savedItemsAtom);
@@ -23,11 +25,10 @@ export const SavedContent = () => {
   const [loading, setLoading] = useAtom(savedLoadingAtom);
   const [loadingMore, setLoadingMore] = useAtom(savedLoadingMoreAtom);
   const [error, setError] = useAtom(savedErrorAtom);
-  const [savedIds] = useAtom(savedIdsAtom);
   const [, toggleSavedId] = useAtom(toggleSavedIdAtom);
   const [user] = useAtom(userAtom);
+  const toast = useToast();
 
-  // Fetch saved items
   const fetchSaved = useCallback(
     async (isLoadMore = false) => {
       if (isLoadMore) {
@@ -62,26 +63,30 @@ export const SavedContent = () => {
     [cursor, hasMore, loadingMore, setItems, setCursor, setHasMore, setLoading, setLoadingMore, setError]
   );
 
-  // Fetch on mount
   useEffect(() => {
     if (user) {
       fetchSaved(false);
     }
   }, [user]);
 
-  // Handle unsave (remove from saved list)
-  const handleToggleSave = async (itemId: string) => {
+  const handleUnsave = async (itemId: string) => {
     try {
       await unsaveItem(itemId);
       toggleSavedId({ id: itemId, saved: false });
-      // Remove from current list
       setItems((prev) => prev.filter((item) => item.id !== itemId));
-    } catch (err) {
-      console.error("Failed to unsave:", err);
+      toast.success("Removed from reading list");
+    } catch {
+      toast.error("Failed to remove item");
     }
   };
 
-  // Not logged in state
+  const sentinelRef = useInfiniteScroll({
+    onLoadMore: () => fetchSaved(true),
+    hasMore,
+    loading: loadingMore,
+    rootMargin: "200px",
+  });
+
   if (!user) {
     return (
       <div className="text-center py-16">
@@ -104,7 +109,6 @@ export const SavedContent = () => {
 
   return (
     <div>
-      {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -118,16 +122,15 @@ export const SavedContent = () => {
         )}
       </motion.div>
 
-      {/* Content */}
       <div className="space-y-6">
-        {/* Loading State */}
         {loading && items.length === 0 && (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+          <div className="space-y-6">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <FeedCardSkeleton key={i} />
+            ))}
           </div>
         )}
 
-        {/* Error State */}
         {error && (
           <div className="flex items-center justify-center py-12 text-red-400">
             <AlertCircle className="w-5 h-5 mr-2" />
@@ -135,7 +138,6 @@ export const SavedContent = () => {
           </div>
         )}
 
-        {/* Empty State */}
         {!loading && !error && items.length === 0 && (
           <div className="text-center py-12 text-gray-500">
             <motion.div
@@ -154,38 +156,21 @@ export const SavedContent = () => {
           </div>
         )}
 
-        {/* Saved Items */}
         {items.map((item, idx) => (
           <FeedCard
             key={item.id}
             item={item}
             index={idx}
             isSaved={true}
-            onToggleSave={handleToggleSave}
+            onToggleSave={handleUnsave}
             showSavedAt={true}
           />
         ))}
 
-        {/* Load More Button */}
-        {hasMore && items.length > 0 && (
-          <div className="flex justify-center pt-4">
-            <motion.button
-              type="button"
-              onClick={() => fetchSaved(true)}
-              disabled={loadingMore}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className="px-6 py-3 bg-zinc-900/50 border border-zinc-800/50 rounded-full text-sm font-light text-gray-400 hover:text-white hover:border-zinc-700/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {loadingMore ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Loading...
-                </>
-              ) : (
-                "Load More"
-              )}
-            </motion.button>
+        <div ref={sentinelRef} />
+        {loadingMore && (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
           </div>
         )}
       </div>

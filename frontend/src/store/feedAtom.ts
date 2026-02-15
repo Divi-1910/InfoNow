@@ -1,7 +1,14 @@
 import { atom } from "jotai";
+import { atomWithStorage } from "jotai/utils";
 import type { FeedItem, FeedFilters, DataType } from "../api/feed";
 
-// Feed filters state
+// Persisted feed mode preference
+export const feedModeStorageAtom = atomWithStorage<"personalized" | "browse">(
+  "infonow:feedMode",
+  "personalized"
+);
+
+// Feed filters state — initializes mode from persisted value
 export const feedFiltersAtom = atom<FeedFilters>({
   mode: "personalized",
 });
@@ -57,10 +64,11 @@ export const updateFiltersAtom = atom(
   }
 );
 
-// Action atom to toggle feed mode
+// Action atom to toggle feed mode (persists to localStorage)
 export const toggleFeedModeAtom = atom(null, (get, set) => {
   const currentFilters = get(feedFiltersAtom);
   const newMode = currentFilters.mode === "personalized" ? "browse" : "personalized";
   set(feedFiltersAtom, { ...currentFilters, mode: newMode });
+  set(feedModeStorageAtom, newMode);
   set(resetFeedAtom);
 });

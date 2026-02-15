@@ -17,27 +17,31 @@ func main() {
 
 	cfg := config.LoadConfig()
 
-	redisClient := redis.NewRedisClient("localhost:6379", "", 0)
+	redisClient := redis.NewRedisClient(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
 	defer redisClient.Close()
 
 	dup := deduper.New(redisClient, 14*24*time.Hour)
 
 	backendClient := client.NewBackendClient(cfg.BackendURL)
 	newsClient := client.NewMultiNewsClient(cfg.NewsAPIKey1, cfg.NewsAPIKey2, cfg.NewsAPIKey3)
+	ytClient := client.NewYouTubeClient(cfg.YouTubeAPIKey, cfg.YouTubeMaxResults)
 
-	kafkaProducer := producer.NewKafkaProducer([]string{"localhost:9092"})
+	kafkaProducer := producer.NewKafkaProducer(cfg.KafkaBrokers)
 	defer kafkaProducer.Close()
 
-	ingestor := ingest.NewNewsIngestor(backendClient, newsClient, dup, kafkaProducer)
+	newsIngestor := ingest.NewNewsIngestor(backendClient, newsClient, dup, kafkaProducer)
+	ytIngestor := ingest.NewYTIngestor(backendClient, ytClient, dup, kafkaProducer)
 
 	ctx := context.Background()
 
 	ticker := time.NewTicker(cfg.ScheduledInterval)
 	defer ticker.Stop()
 
-	ingestor.Run(ctx)
+	newsIngestor.Run(ctx)
+	ytIngestor.Run(ctx)
 
 	for range ticker.C {
-		ingestor.Run(ctx)
+		newsIngestor.Run(ctx)
+		ytIngestor.Run(ctx)
 	}
 }

@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestor
+  namespace: infonow
+  labels:
+    app: ingestor
+spec:
+  # Keep single replica to avoid duplicate pull loops unless you implement leader election.
+  replicas: 1
+  revisionHistoryLimit: 2
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ingestor
+  template:
+    metadata:
+      labels:
+        app: ingestor
+    spec:
+      containers:
+        - name: ingestor
+          image: ghcr.io/your-org/infonow-ingestor:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: BACKEND_URL
+              value: "http://backend.infonow.svc.cluster.local:3000"
+            - name: REDIS_ADDR
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: REDIS_ADDR
+            - name: REDIS_PASSWORD
+              value: ""
+            - name: REDIS_DB
+              value: "0"
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: KAFKA_BROKERS
+            - name: SCHEDULED_INTERVAL_IN_HOURS
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: SCHEDULED_INTERVAL_IN_HOURS
+            - name: YOUTUBE_MAX_RESULTS
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: YOUTUBE_MAX_RESULTS
+            - name: NEWSAPI_KEY_1
+              valueFrom:
+                secretKeyRef:
+                  name: infonow-secrets
+                  key: NEWSAPI_KEY_1
+            - name: NEWSAPI_KEY_2
+              valueFrom:
+                secretKeyRef:
+                  name: infonow-secrets
+                  key: NEWSAPI_KEY_2
+            - name: NEWSAPI_KEY_3
+              valueFrom:
+                secretKeyRef:
+                  name: infonow-secrets
+                  key: NEWSAPI_KEY_3
+            - name: YOUTUBE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: infonow-secrets
+                  key: YOUTUBE_API_KEY
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

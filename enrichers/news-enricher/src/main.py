@@ -159,26 +159,19 @@ class NewsEnricher:
 
         while self.running:
             try:
-                # Fetch batch of articles
-                articles = self.consumer.fetch_batch(batch_size=settings.batch_size)
-
-                if not articles:
+                article = self.consumer.fetch_one()
+                if not article:
                     await asyncio.sleep(1)
                     continue
 
-                logger.info(f"Processing batch of {len(articles)} articles")
-
-                # Process each article
-                success_count = 0
-                for article in articles:
-                    success = await self.process_article(article)
-                    if success:
-                        success_count += 1
-
-                # Commit after processing batch
-                self.consumer.commit()
-
-                logger.info(f"Batch complete: {success_count}/{len(articles)} successful")
+                success = await self.process_article(article)
+                if success:
+                    self.consumer.commit()
+                    logger.info(f"Processed and committed article: {article.data_point_id}")
+                else:
+                    logger.warning(
+                        f"Processing failed for article {article.data_point_id}, offset not committed"
+                    )
 
             except Exception as e:
                 logger.error(f"Error in processing loop: {e}")

@@ -114,7 +114,8 @@ model DataPoint {
   rawYoutube RawYoutubeVideo?
 
   // Enriched content (future)
-  enrichedNews EnrichedNewsArticle?
+  enrichedNews    EnrichedNewsArticle?
+  enrichedYoutube EnrichedYoutubeVideo?
 
   // User saved items
   savedByUsers SavedItem[]
@@ -210,6 +211,32 @@ model NewsChunk {
   @@index([enrichedArticleId])
 }
 
+model EnrichedYoutubeVideo {
+  id           String   @id @default(uuid())
+  dataId       String   @unique
+  transcript   String   @db.Text
+  summary      String?  @db.Text
+  transcribedAt DateTime
+
+  dataPoint DataPoint               @relation(fields: [dataId], references: [id], onDelete: Cascade)
+  chunks    YoutubeTranscriptChunk[]
+
+  @@index([transcribedAt])
+}
+
+model YoutubeTranscriptChunk {
+  id              String  @id @default(uuid())
+  enrichedVideoId String
+  chunkIndex      Int
+  content         String  @db.Text
+  embedding       Float[]
+  tokenCount      Int
+
+  enrichedVideo EnrichedYoutubeVideo @relation(fields: [enrichedVideoId], references: [id], onDelete: Cascade)
+
+  @@index([enrichedVideoId])
+}
+
 // Raw API response dump for reprocessing capability
 model RawApiResponse {
   id         String   @id @default(uuid())
@@ -231,6 +258,7 @@ enum OutboxEventType {
   YoutubeVideoCreated
   // Enricher events (index to OpenSearch)
   NewsArticleEnriched
+  YoutubeVideoEnriched
 }
 
 model OutboxEvent {

@@ -105,6 +105,144 @@ services:
       - "5601:5601"
 
   # ============================================
+  # Observability Stack
+  # ============================================
+
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: loki
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./observability/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:2.9.8
+    container_name: promtail
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./observability/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.7.1
+    container_name: tempo
+    command: ["-config.file=/etc/tempo.yml"]
+    volumes:
+      - ./observability/tempo/tempo.yml:/etc/tempo.yml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector/config.yml"]
+    volumes:
+      - ./observability/otel-collector/config.yml:/etc/otel-collector/config.yml:ro
+    depends_on:
+      - tempo
+    ports:
+      - "8889:8889"
+      - "4319:4317"
+      - "4320:4318"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - cadvisor
+      - node-exporter
+      - postgres-exporter
+      - redis-exporter
+      - kafka-exporter
+      - otel-collector
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: node-exporter
+    command:
+      - --path.rootfs=/host
+    volumes:
+      - /:/host:ro
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: postgresql://Divyansh:dabadebadeba@postgres:5432/info_now_db?sslmode=disable
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.64.0
+    container_name: redis-exporter
+    environment:
+      REDIS_ADDR: redis://redis-name:6379
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.8.0
+    container_name: kafka-exporter
+    command:
+      - "--kafka.server=broker:29092"
+    depends_on:
+      - broker
+    restart: unless-stopped
+
+  # ============================================
   # Data Pipeline Services
   # ============================================
 
@@ -121,8 +259,81 @@ services:
       KAFKA_CONSUMER_GROUP: transformer-news
       KAFKA_INPUT_TOPIC: ingest.news.raw
       KAFKA_OUTPUT_TOPIC: process.news.clean
-      DATABASE_URL: postgresql://Divyansh:dabadebadeba@postgres:5432/info_now_db
+      KAFKA_YT_CONSUMER_GROUP: transformer-yt
+      KAFKA_YT_INPUT_TOPIC: ingest.yt.raw
+      KAFKA_YT_OUTPUT_TOPIC: process.yt.clean
+      DATABASE_URL: postgresql://Divyansh:dabadebadeba@postgres:5432/info_now_db?sslmode=disable
       BATCH_SIZE: "100"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: transformer
+    restart: unless-stopped
+
+  ingestor:
+    image: golang:1.24-alpine
+    container_name: ingestor
+    working_dir: /app
+    depends_on:
+      - broker
+      - redis
+      - backend
+    env_file:
+      - ../ingestor/.env
+    environment:
+      BACKEND_URL: http://backend:3000
+      REDIS_ADDR: redis-name:6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: "0"
+      KAFKA_BROKERS: broker:29092
+      SCHEDULED_INTERVAL_IN_HOURS: "4"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: ingestor
+    command: sh -c "apk add --no-cache git && go mod download && go run ./cmd/main.go"
+    volumes:
+      - ../ingestor:/app
+    restart: unless-stopped
+
+  backend:
+    image: node:20-alpine
+    container_name: backend
+    working_dir: /app
+    depends_on:
+      - postgres
+      - pgbouncer
+      - redis
+    env_file:
+      - ../backend/.env
+    environment:
+      PORT: "3000"
+      DIRECT_DATABASE_URL: postgresql://Divyansh:dabadebadeba@postgres:5432/info_now_db?schema=public
+      POOLED_DATABASE_URL: postgresql://Divyansh:dabadebadeba@pgbouncer:5432/info_now_db?schema=public&pgbouncer=true
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: backend
+    command: sh -c "npm install && npx prisma migrate deploy && npm run dev"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../backend:/app
+    restart: unless-stopped
+
+  frontend:
+    image: node:20-alpine
+    container_name: frontend
+    working_dir: /app
+    depends_on:
+      - backend
+    env_file:
+      - ../frontend/.env
+    environment:
+      VITE_BACKEND_URL: http://localhost:3000
+      VITE_OTEL_COLLECTOR_URL: http://localhost:4320
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../frontend:/app
     restart: unless-stopped
 
   news-enricher:
@@ -138,7 +349,7 @@ services:
       KAFKA_BROKERS: broker:29092
       KAFKA_CONSUMER_GROUP: enricher-news
       KAFKA_INPUT_TOPIC: process.news.clean
-      DATABASE_URL: postgresql://Divyansh:dabadebadeba@postgres:5432/info_now_db
+      DATABASE_URL: postgresql://Divyansh:dabadebadeba@postgres:5432/info_now_db?sslmode=disable
       OPENSEARCH_URL: http://os-main:9200
       OPENSEARCH_INDEX: news-enriched
       OLLAMA_URL: http://host.docker.internal:11434
@@ -148,6 +359,37 @@ services:
       SCRAPER_WORKERS: "10"
       SCRAPER_TIMEOUT_SECONDS: "10"
       BATCH_SIZE: "10"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: news-enricher
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  yt-enricher:
+    build:
+      context: ../enrichers/yt-enricher
+      dockerfile: Dockerfile
+    container_name: yt-enricher
+    depends_on:
+      - broker
+      - postgres
+      - opensearch
+    environment:
+      KAFKA_BROKERS: broker:29092
+      KAFKA_CONSUMER_GROUP: enricher-yt
+      KAFKA_INPUT_TOPIC: process.yt.clean
+      DATABASE_URL: postgresql://Divyansh:dabadebadeba@postgres:5432/info_now_db?sslmode=disable
+      OPENSEARCH_URL: http://os-main:9200
+      OPENSEARCH_INDEX: yt-enriched
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: nomic-embed-text
+      EMBEDDING_DIMENSION: "768"
+      MAX_CHUNK_TOKENS: "512"
+      BATCH_SIZE: "10"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: yt-enricher
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -157,3 +399,7 @@ volumes:
   redis_data:
   kafka_data:
   opensearch_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  tempo_data:

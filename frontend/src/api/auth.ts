@@ -27,3 +27,7 @@ export const handleGoogleLoginSuccess = async (
     throw error;
   }
 };
+
+export const logout = async (): Promise<void> => {
+  await axiosInstance.post("/api/auth/logout");
+};

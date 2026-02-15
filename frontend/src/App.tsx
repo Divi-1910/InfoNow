@@ -8,6 +8,8 @@ import HomePage from "./pages/HomePage";
 import ProfilePage from "./pages/ProfilePage";
 import "./App.css";
 import Loading from "./components/Loading";
+import { ToastContainer } from "./components/ui/Toast";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -35,25 +37,30 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<WelcomePage />} />
-      <Route
-        path="/home"
-        element={
-          <ProtectedRoute>
-            <HomePage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/profile"
-        element={
-          <ProtectedRoute>
-            <ProfilePage />
-          </ProtectedRoute>
-        }
-      />
-    </Routes>
+    <>
+      <ErrorBoundary>
+      <Routes>
+        <Route path="/" element={<WelcomePage />} />
+        <Route
+          path="/home"
+          element={
+            <ProtectedRoute>
+              <HomePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute>
+              <ProfilePage />
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+      </ErrorBoundary>
+      <ToastContainer />
+    </>
   );
 }
 

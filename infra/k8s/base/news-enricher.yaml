@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: news-enricher
+  namespace: infonow
+  labels:
+    app: news-enricher
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: news-enricher
+  template:
+    metadata:
+      labels:
+        app: news-enricher
+    spec:
+      containers:
+        - name: news-enricher
+          image: ghcr.io/your-org/infonow-news-enricher:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: KAFKA_BROKERS
+            - name: KAFKA_CONSUMER_GROUP
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: KAFKA_NEWS_ENRICHER_GROUP
+            - name: KAFKA_INPUT_TOPIC
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: KAFKA_NEWS_OUTPUT_TOPIC
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: infonow-secrets
+                  key: DATABASE_URL
+            - name: OPENSEARCH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: OPENSEARCH_URL
+            - name: OPENSEARCH_INDEX
+              value: "news-enriched"
+            - name: OLLAMA_URL
+              valueFrom:
+                secretKeyRef:
+                  name: infonow-secrets
+                  key: OLLAMA_URL
+            - name: OLLAMA_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: EMBEDDING_MODEL
+            - name: EMBEDDING_DIMENSION
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: EMBEDDING_DIMENSION
+            - name: MAX_CHUNK_TOKENS
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: MAX_CHUNK_TOKENS
+            - name: SCRAPER_WORKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: SCRAPER_WORKERS
+            - name: SCRAPER_TIMEOUT_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: SCRAPER_TIMEOUT_SECONDS
+            - name: BATCH_SIZE
+              value: "10"
+          resources:
+            requests:
+              cpu: 300m
+              memory: 512Mi
+            limits:
+              cpu: 2
+              memory: 2Gi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: news-enricher
+  namespace: infonow
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: news-enricher
+  minReplicas: 2
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

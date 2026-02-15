@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backend-migrate
+  namespace: infonow
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ghcr.io/your-org/infonow-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["npx", "prisma", "migrate", "deploy"]
+          env:
+            - name: DIRECT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: infonow-secrets
+                  key: DIRECT_DATABASE_URL
+            - name: POOLED_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: infonow-secrets
+                  key: POOLED_DATABASE_URL

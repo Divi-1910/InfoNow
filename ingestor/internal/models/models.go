@@ -43,7 +43,7 @@ type RedditPoint struct {
 }
 
 // YoutubePoint represents a YouTube video
-// Kafka topic: ingest.youtube.raw
+// Kafka topic: ingest.yt.raw
 type YoutubePoint struct {
 	BasePoint
 	VideoID      string    `json:"video_id"`

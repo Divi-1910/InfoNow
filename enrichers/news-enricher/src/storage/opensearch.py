@@ -94,33 +94,6 @@ class OpenSearchStorage:
             logger.error(f"Error bulk indexing: {e}")
             raise
 
-    def search_similar(
-        self, embedding: List[float], k: int = 10, filters: dict = None
-    ) -> List[dict]:
-        """Search for similar documents using vector similarity"""
-        query = {
-            "size": k,
-            "query": {
-                "knn": {
-                    "embedding": {
-                        "vector": embedding,
-                        "k": k,
-                    }
-                }
-            },
-        }
-
-        if filters:
-            query["query"] = {
-                "bool": {
-                    "must": [query["query"]],
-                    "filter": [{"term": {k: v}} for k, v in filters.items()],
-                }
-            }
-
-        response = self.client.search(index=self.index_name, body=query)
-        return [hit["_source"] for hit in response["hits"]["hits"]]
-
     def close(self):
         """Close the OpenSearch client"""
         self.client.close()

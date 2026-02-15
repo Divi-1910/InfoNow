@@ -61,7 +61,9 @@ func (p *Publisher) processBatch(ctx context.Context) error {
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT id, "aggregateId", topic, payload
 		FROM "OutboxEvent"
-		WHERE processed = false AND "retryCount" < $1
+		WHERE processed = false
+		  AND "retryCount" < $1
+		  AND "eventType" IN ('NewsArticleCreated', 'YoutubeVideoCreated', 'RedditPostCreated')
 		ORDER BY "createdAt"
 		FOR UPDATE SKIP LOCKED
 		LIMIT $2

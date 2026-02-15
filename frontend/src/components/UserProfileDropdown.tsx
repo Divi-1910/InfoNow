@@ -3,6 +3,8 @@ import { Settings, LogOut, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAtom } from "jotai";
 import { userAtom } from "../store/userAtom";
+import { logout } from "../api/auth";
+import { useToast } from "@/hooks/useToast";
 
 interface UserProfileDropdownProps {
   isOpen: boolean;
@@ -11,16 +13,24 @@ interface UserProfileDropdownProps {
 
 const UserProfileDropdown = ({ isOpen, onClose }: UserProfileDropdownProps) => {
   const navigate = useNavigate();
-  const [user] = useAtom(userAtom);
+  const [user, setUser] = useAtom(userAtom);
+  const toast = useToast();
 
   const handleProfileClick = () => {
     navigate("/profile");
     onClose();
   };
 
-  const handleLogout = () => {
-    // TODO: Implement logout
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // Even if API fails, clear local state
+    }
+    setUser(null);
+    toast.success("Logged out successfully");
     onClose();
+    navigate("/");
   };
 
   return (

@@ -25,30 +25,23 @@ class KafkaConsumer:
         )
         logger.info(f"Kafka consumer initialized for topic: {topic}")
 
-    def fetch_batch(self, batch_size: int = 10) -> List[CleanNewsPoint]:
-        """Fetch a batch of messages from Kafka"""
-        messages = []
+    def fetch_one(self) -> Optional[CleanNewsPoint]:
+        """Fetch a single message from Kafka without committing offset"""
         try:
-            # Poll for messages
-            records = self.consumer.poll(timeout_ms=5000, max_records=batch_size)
+            records = self.consumer.poll(timeout_ms=5000, max_records=1)
 
             for topic_partition, partition_records in records.items():
                 for record in partition_records:
                     try:
-                        # Parse the message into CleanNewsPoint
-                        point = CleanNewsPoint(**record.value)
-                        messages.append(point)
+                        return CleanNewsPoint(**record.value)
                     except Exception as e:
                         logger.error(f"Failed to parse message: {e}")
-                        continue
 
-            if messages:
-                logger.debug(f"Fetched {len(messages)} messages from Kafka")
+            return None
 
         except Exception as e:
             logger.error(f"Error fetching from Kafka: {e}")
-
-        return messages
+            return None
 
     def commit(self):
         """Commit current offsets"""

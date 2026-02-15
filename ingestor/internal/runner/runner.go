@@ -50,3 +50,41 @@ func ConvertArticleToNewsPoint(article client.Article, topic string, subtopic st
 		ImageURL:    article.URLToImage,
 	}, nil
 }
+
+func ConvertVideoToYoutubePoint(video client.YouTubeVideo, topic string, subtopic string) (models.YoutubePoint, error) {
+	dataID, err := identity.YoutubeDataID(video.VideoID)
+	if err != nil {
+		return models.YoutubePoint{}, fmt.Errorf("failed to generate data_id: %w", err)
+	}
+
+	publishedAt, err := time.Parse(time.RFC3339, video.PublishedAt)
+	if err != nil {
+		publishedAt = time.Now().UTC()
+	}
+
+	contentBasis := strings.TrimSpace(video.Description)
+	if contentBasis == "" {
+		contentBasis = video.Title
+	}
+	contentHash := ComputeContentHash(contentBasis)
+
+	return models.YoutubePoint{
+		BasePoint: models.BasePoint{
+			ID:             dataID,
+			Topic:          topic,
+			SubTopic:       subtopic,
+			FetchTimestamp: time.Now().UTC(),
+			ContentHash:    contentHash,
+		},
+		VideoID:      video.VideoID,
+		ChannelID:    video.ChannelID,
+		ChannelTitle: video.ChannelTitle,
+		Title:        video.Title,
+		Description:  video.Description,
+		ThumbnailURL: video.ThumbnailURL,
+		PublishedAt:  publishedAt,
+		Duration:     video.Duration,
+		ViewCount:    video.ViewCount,
+		LikeCount:    video.LikeCount,
+	}, nil
+}

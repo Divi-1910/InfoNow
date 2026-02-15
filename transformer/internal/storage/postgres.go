@@ -199,6 +199,101 @@ func (s *PostgresStorage) SaveNewsArticleWithOutbox(ctx context.Context, np mode
 	return dataPointID, nil
 }
 
+// SaveYoutubeVideoWithOutbox saves a youtube video and creates an outbox event in a single transaction
+func (s *PostgresStorage) SaveYoutubeVideoWithOutbox(ctx context.Context, yp models.YoutubePoint, kafkaTopic string) (string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var topicID, subTopicID *int
+	if yp.Topic != "" {
+		var tid int
+		err := tx.QueryRowContext(ctx, `SELECT id FROM "Topic" WHERE slug = $1`, yp.Topic).Scan(&tid)
+		if err == nil {
+			topicID = &tid
+		}
+	}
+	if yp.SubTopic != "" {
+		var stid int
+		err := tx.QueryRowContext(ctx, `SELECT id FROM "SubTopic" WHERE slug = $1`, yp.SubTopic).Scan(&stid)
+		if err == nil {
+			subTopicID = &stid
+		}
+	}
+
+	var dataPointID string
+	err = tx.QueryRowContext(ctx,
+		`INSERT INTO "DataPoint" (id, type, "contentHash", "topicId", "subTopicId", "fetchedAt", "createdAt")
+		 VALUES (gen_random_uuid(), 'Youtube', $1, $2, $3, $4, NOW())
+		 RETURNING id`,
+		yp.ContentHash, topicID, subTopicID, yp.FetchTimestamp,
+	).Scan(&dataPointID)
+	if err != nil {
+		return "", fmt.Errorf("failed to insert DataPoint: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO "RawYoutubeVideo" (id, "dataId", "videoId", "channelId", "channelTitle", title, description, "thumbnailUrl", "publishedAt", duration, "viewCount", "likeCount")
+		 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		dataPointID,
+		yp.VideoID,
+		yp.ChannelID,
+		yp.ChannelTitle,
+		yp.Title,
+		nullString(yp.Description),
+		nullString(yp.ThumbnailURL),
+		yp.PublishedAt,
+		nullString(yp.Duration),
+		yp.ViewCount,
+		yp.LikeCount,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to insert RawYoutubeVideo: %w", err)
+	}
+
+	cleanPoint := models.CleanYoutubePoint{
+		ID:             yp.ID,
+		Topic:          yp.Topic,
+		SubTopic:       yp.SubTopic,
+		FetchTimestamp: yp.FetchTimestamp,
+		ContentHash:    yp.ContentHash,
+		VideoID:        yp.VideoID,
+		ChannelID:      yp.ChannelID,
+		ChannelTitle:   yp.ChannelTitle,
+		Title:          yp.Title,
+		Description:    yp.Description,
+		ThumbnailURL:   yp.ThumbnailURL,
+		PublishedAt:    yp.PublishedAt,
+		Duration:       yp.Duration,
+		ViewCount:      yp.ViewCount,
+		LikeCount:      yp.LikeCount,
+		DataPointID:    dataPointID,
+	}
+
+	payload, err := json.Marshal(cleanPoint)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal CleanYoutubePoint: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO "OutboxEvent"
+		 (id, "aggregateType", "aggregateId", "eventType", topic, payload, processed, "retryCount", "maxRetries", "createdAt")
+		 VALUES (gen_random_uuid(), 'youtube', $1, 'YoutubeVideoCreated', $2, $3, false, 0, 3, NOW())`,
+		dataPointID, kafkaTopic, payload,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to insert OutboxEvent: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return dataPointID, nil
+}
+
 // SaveRawApiResponse saves the raw API response for replay capability
 func (s *PostgresStorage) SaveRawApiResponse(ctx context.Context, sourceType string, payload []byte) error {
 	_, err := s.db.ExecContext(ctx,
@@ -215,6 +310,16 @@ func (s *PostgresStorage) CheckURLExists(ctx context.Context, url string) (bool,
 	err := s.db.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM "RawNewsArticle" WHERE url = $1)`,
 		url,
+	).Scan(&exists)
+	return exists, err
+}
+
+// CheckVideoIDExists checks if a youtube video_id already exists in the database
+func (s *PostgresStorage) CheckVideoIDExists(ctx context.Context, videoID string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM "RawYoutubeVideo" WHERE "videoId" = $1)`,
+		videoID,
 	).Scan(&exists)
 	return exists, err
 }

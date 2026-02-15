@@ -5,21 +5,35 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 	"transformer/internal/config"
 	"transformer/internal/consumer"
+	"transformer/internal/dlq"
+	"transformer/internal/offsets"
 	"transformer/internal/outbox"
 	"transformer/internal/processor"
 	"transformer/internal/storage"
 )
+
+type messageKey struct {
+	partition int
+	offset    int64
+}
+
+type processOutcome struct {
+	index     int
+	ack       bool
+	retriable bool
+	reason    string
+}
 
 func main() {
 	log.Println("Starting Transformer Service")
 
 	cfg := config.LoadConfig()
 
-	// Initialize storage
 	store, err := storage.NewPostgresStorage(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
@@ -27,16 +41,22 @@ func main() {
 	defer store.Close()
 	log.Println("Connected to PostgreSQL")
 
-	// Initialize Kafka consumer
-	kafkaConsumer := consumer.NewKafkaConsumer(
+	newsConsumer := consumer.NewKafkaConsumer(
 		cfg.KafkaBrokers,
 		cfg.KafkaInputTopic,
 		cfg.KafkaConsumerGroup,
 	)
-	defer kafkaConsumer.Close()
+	defer newsConsumer.Close()
 	log.Printf("Kafka consumer initialized for topic: %s", cfg.KafkaInputTopic)
 
-	// Initialize outbox publisher (replaces direct Kafka producer)
+	ytConsumer := consumer.NewKafkaConsumer(
+		cfg.KafkaBrokers,
+		cfg.YouTubeInputTopic,
+		cfg.YouTubeConsumerGroup,
+	)
+	defer ytConsumer.Close()
+	log.Printf("Kafka consumer initialized for topic: %s", cfg.YouTubeInputTopic)
+
 	outboxPublisher := outbox.NewPublisher(
 		store.DB(),
 		cfg.KafkaBrokers,
@@ -48,10 +68,11 @@ func main() {
 	log.Printf("Outbox publisher initialized (interval=%v, batch=%d, maxRetries=%d)",
 		cfg.OutboxPollInterval, cfg.OutboxBatchSize, cfg.OutboxMaxRetries)
 
-	// Initialize processor
 	newsProcessor := processor.NewNewsProcessor()
+	ytProcessor := processor.NewYouTubeProcessor()
+	dlqProducer := dlq.NewProducer(cfg.KafkaBrokers)
+	defer dlqProducer.Close()
 
-	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -64,90 +85,283 @@ func main() {
 		cancel()
 	}()
 
-	// Start outbox publisher in background goroutine
 	go outboxPublisher.Start(ctx)
 
-	// Main processing loop (now writes to DB + outbox, no direct Kafka publish)
-	log.Println("Starting message processing loop")
-	processMessages(ctx, cfg, kafkaConsumer, store, newsProcessor)
+	log.Println("Starting message processing loops")
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		processNewsMessages(ctx, cfg, newsConsumer, store, newsProcessor, dlqProducer)
+	}()
+
+	go func() {
+		defer wg.Done()
+		processYouTubeMessages(ctx, cfg, ytConsumer, store, ytProcessor, dlqProducer)
+	}()
+
+	wg.Wait()
 }
 
-func processMessages(
+func processNewsMessages(
 	ctx context.Context,
 	cfg *config.Config,
 	kafkaConsumer *consumer.KafkaConsumer,
 	store *storage.PostgresStorage,
 	proc *processor.NewsProcessor,
+	dlqProducer *dlq.Producer,
 ) {
+	tracker := offsets.NewTracker()
+	retryCounts := make(map[messageKey]int)
+
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Context cancelled, exiting processing loop")
+			log.Println("Context cancelled, exiting news processing loop")
 			return
 		default:
 		}
 
-		// Create a timeout context for fetching messages
 		fetchCtx, fetchCancel := context.WithTimeout(ctx, 5*time.Second)
-
-		// Fetch batch of messages
 		newsPoints, messages, err := kafkaConsumer.FetchBatch(fetchCtx, cfg.BatchSize)
 		fetchCancel()
 
 		if err != nil {
 			if ctx.Err() != nil {
-				return // Context cancelled
+				return
 			}
-			log.Printf("Error fetching messages: %v", err)
+			if err == context.DeadlineExceeded || err == context.Canceled {
+				continue
+			}
+			log.Printf("Error fetching news messages: %v", err)
 			time.Sleep(time.Second)
 			continue
 		}
-
 		if len(newsPoints) == 0 {
 			continue
 		}
 
-		log.Printf("Processing batch of %d messages", len(newsPoints))
+		outcomes := make([]processOutcome, 0, len(newsPoints))
+		results := make(chan processOutcome, len(newsPoints))
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, cfg.ProcessingWorkers)
 
-		var validCount, invalidCount, duplicateCount int
+		for i := range newsPoints {
+			i := i
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
 
-		for _, np := range newsPoints {
-			// Validate and clean
-			result := proc.Validate(np)
-			if !result.Valid {
-				invalidCount++
-				log.Printf("Invalid article (ID=%s): %s", np.ID, result.Reason)
-				continue
-			}
+				np := newsPoints[i]
+				result := proc.Validate(np)
+				if !result.Valid {
+					results <- processOutcome{index: i, ack: false, retriable: false, reason: result.Reason}
+					return
+				}
 
-			// Check for duplicates in DB
-			exists, err := store.CheckURLExists(ctx, result.Cleaned.URL)
-			if err != nil {
-				log.Printf("Error checking URL existence: %v", err)
-				continue
-			}
-			if exists {
-				duplicateCount++
-				continue
-			}
+				exists, err := store.CheckURLExists(ctx, result.Cleaned.URL)
+				if err != nil {
+					results <- processOutcome{index: i, ack: false, retriable: true, reason: "db duplicate check failed"}
+					return
+				}
+				if exists {
+					results <- processOutcome{index: i, ack: true, retriable: false}
+					return
+				}
 
-			// Save to database + create outbox event (single atomic transaction)
-			// The outbox publisher will handle Kafka publishing asynchronously
-			_, err = store.SaveNewsArticleWithOutbox(ctx, result.Cleaned, cfg.KafkaOutputTopic)
-			if err != nil {
-				log.Printf("Error saving article (ID=%s): %v", np.ID, err)
-				continue
-			}
+				if _, err := store.SaveNewsArticleWithOutbox(ctx, result.Cleaned, cfg.KafkaOutputTopic); err != nil {
+					results <- processOutcome{index: i, ack: false, retriable: true, reason: "db save failed"}
+					return
+				}
+				results <- processOutcome{index: i, ack: true, retriable: false}
+			}()
+		}
+		wg.Wait()
+		close(results)
 
-			validCount++
+		for outcome := range results {
+			outcomes = append(outcomes, outcome)
 		}
 
-		// Commit processed messages
-		if err := kafkaConsumer.CommitMessages(ctx, messages); err != nil {
-			log.Printf("Error committing messages: %v", err)
+		for _, outcome := range outcomes {
+			msg := messages[outcome.index]
+			key := messageKey{partition: msg.Partition, offset: msg.Offset}
+
+			if outcome.ack {
+				delete(retryCounts, key)
+				tracker.Ack(msg)
+				continue
+			}
+
+			if outcome.retriable {
+				retryCounts[key]++
+				if retryCounts[key] < cfg.ProcessingMaxRetries {
+					continue
+				}
+			}
+
+			reason := outcome.reason
+			attempts := retryCounts[key]
+			if outcome.retriable {
+				reason = "max retries reached: " + outcome.reason
+			} else if attempts == 0 {
+				attempts = 1
+			}
+
+			err := dlqProducer.Publish(ctx, cfg.NewsDLQTopic, dlq.Event{
+				SourceTopic: cfg.KafkaInputTopic,
+				Partition:   msg.Partition,
+				Offset:      msg.Offset,
+				Key:         string(msg.Key),
+				Reason:      reason,
+				Attempts:    attempts,
+				Payload:     msg.Value,
+			})
+			if err != nil {
+				log.Printf("Failed to publish news DLQ event partition=%d offset=%d: %v", msg.Partition, msg.Offset, err)
+				continue
+			}
+
+			delete(retryCounts, key)
+			tracker.Ack(msg)
 		}
 
-		log.Printf("Batch complete: valid=%d invalid=%d duplicates=%d (outbox will publish)",
-			validCount, invalidCount, duplicateCount)
+		if err := tracker.CommitReady(ctx, kafkaConsumer.CommitMessages); err != nil {
+			log.Printf("Error committing contiguous news offsets: %v", err)
+		}
+	}
+}
+
+func processYouTubeMessages(
+	ctx context.Context,
+	cfg *config.Config,
+	kafkaConsumer *consumer.KafkaConsumer,
+	store *storage.PostgresStorage,
+	proc *processor.YouTubeProcessor,
+	dlqProducer *dlq.Producer,
+) {
+	tracker := offsets.NewTracker()
+	retryCounts := make(map[messageKey]int)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Context cancelled, exiting youtube processing loop")
+			return
+		default:
+		}
+
+		fetchCtx, fetchCancel := context.WithTimeout(ctx, 5*time.Second)
+		ytPoints, messages, err := kafkaConsumer.FetchYouTubeBatch(fetchCtx, cfg.BatchSize)
+		fetchCancel()
+
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			if err == context.DeadlineExceeded || err == context.Canceled {
+				continue
+			}
+			log.Printf("Error fetching youtube messages: %v", err)
+			time.Sleep(time.Second)
+			continue
+		}
+		if len(ytPoints) == 0 {
+			continue
+		}
+
+		outcomes := make([]processOutcome, 0, len(ytPoints))
+		results := make(chan processOutcome, len(ytPoints))
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, cfg.ProcessingWorkers)
+
+		for i := range ytPoints {
+			i := i
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				yp := ytPoints[i]
+				result := proc.Validate(yp)
+				if !result.Valid {
+					results <- processOutcome{index: i, ack: false, retriable: false, reason: result.Reason}
+					return
+				}
+
+				exists, err := store.CheckVideoIDExists(ctx, result.Cleaned.VideoID)
+				if err != nil {
+					results <- processOutcome{index: i, ack: false, retriable: true, reason: "db duplicate check failed"}
+					return
+				}
+				if exists {
+					results <- processOutcome{index: i, ack: true, retriable: false}
+					return
+				}
+
+				if _, err := store.SaveYoutubeVideoWithOutbox(ctx, result.Cleaned, cfg.YouTubeOutputTopic); err != nil {
+					results <- processOutcome{index: i, ack: false, retriable: true, reason: "db save failed"}
+					return
+				}
+				results <- processOutcome{index: i, ack: true, retriable: false}
+			}()
+		}
+		wg.Wait()
+		close(results)
+
+		for outcome := range results {
+			outcomes = append(outcomes, outcome)
+		}
+
+		for _, outcome := range outcomes {
+			msg := messages[outcome.index]
+			key := messageKey{partition: msg.Partition, offset: msg.Offset}
+
+			if outcome.ack {
+				delete(retryCounts, key)
+				tracker.Ack(msg)
+				continue
+			}
+
+			if outcome.retriable {
+				retryCounts[key]++
+				if retryCounts[key] < cfg.ProcessingMaxRetries {
+					continue
+				}
+			}
+
+			reason := outcome.reason
+			attempts := retryCounts[key]
+			if outcome.retriable {
+				reason = "max retries reached: " + outcome.reason
+			} else if attempts == 0 {
+				attempts = 1
+			}
+
+			err := dlqProducer.Publish(ctx, cfg.YouTubeDLQTopic, dlq.Event{
+				SourceTopic: cfg.YouTubeInputTopic,
+				Partition:   msg.Partition,
+				Offset:      msg.Offset,
+				Key:         string(msg.Key),
+				Reason:      reason,
+				Attempts:    attempts,
+				Payload:     msg.Value,
+			})
+			if err != nil {
+				log.Printf("Failed to publish youtube DLQ event partition=%d offset=%d: %v", msg.Partition, msg.Offset, err)
+				continue
+			}
+
+			delete(retryCounts, key)
+			tracker.Ack(msg)
+		}
+
+		if err := tracker.CommitReady(ctx, kafkaConsumer.CommitMessages); err != nil {
+			log.Printf("Error committing contiguous youtube offsets: %v", err)
+		}
 	}
 }

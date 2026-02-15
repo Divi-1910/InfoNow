@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: infonow-config
+  namespace: infonow
+data:
+  BACKEND_PORT: "3000"
+  FRONTEND_PORT: "5173"
+
+  # Managed/external infrastructure endpoints
+  KAFKA_BROKERS: "kafka-bootstrap.kafka.svc.cluster.local:9092"
+  REDIS_ADDR: "redis-master.redis.svc.cluster.local:6379"
+  OPENSEARCH_URL: "http://opensearch-cluster-master.opensearch.svc.cluster.local:9200"
+
+  # Pipeline topics
+  KAFKA_NEWS_INPUT_TOPIC: "ingest.news.raw"
+  KAFKA_NEWS_OUTPUT_TOPIC: "process.news.clean"
+  KAFKA_YT_INPUT_TOPIC: "ingest.yt.raw"
+  KAFKA_YT_OUTPUT_TOPIC: "process.yt.clean"
+
+  # Consumer groups
+  KAFKA_TRANSFORMER_NEWS_GROUP: "transformer-news"
+  KAFKA_TRANSFORMER_YT_GROUP: "transformer-yt"
+  KAFKA_NEWS_ENRICHER_GROUP: "enricher-news"
+  KAFKA_YT_ENRICHER_GROUP: "enricher-yt"
+
+  # Enricher tuning
+  EMBEDDING_MODEL: "nomic-embed-text"
+  EMBEDDING_DIMENSION: "768"
+  MAX_CHUNK_TOKENS: "512"
+  SCRAPER_WORKERS: "10"
+  SCRAPER_TIMEOUT_SECONDS: "10"
+
+  # Ingestor settings
+  SCHEDULED_INTERVAL_IN_HOURS: "4"
+  YOUTUBE_MAX_RESULTS: "10"
+
+  # Frontend runtime API URL (inside cluster)
+  VITE_BACKEND_URL: "http://backend.infonow.svc.cluster.local:3000"

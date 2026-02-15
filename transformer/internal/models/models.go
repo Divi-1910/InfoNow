@@ -35,7 +35,49 @@ type CleanNewsPoint struct {
 	Author         string    `json:"author,omitempty"`
 	ImageURL       string    `json:"image_url,omitempty"`
 	// Database reference for the enricher
-	DataPointID    string    `json:"data_point_id"`
+	DataPointID string `json:"data_point_id"`
+}
+
+// YoutubePoint is the input model from ingest.yt.raw topic
+// Matches the structure from the ingestor service
+type YoutubePoint struct {
+	ID             string    `json:"id"`
+	Topic          string    `json:"topic"`
+	SubTopic       string    `json:"subtopic"`
+	FetchTimestamp time.Time `json:"fetch_timestamp"`
+	ContentHash    string    `json:"content_hash"`
+	VideoID        string    `json:"video_id"`
+	ChannelID      string    `json:"channel_id"`
+	ChannelTitle   string    `json:"channel_title"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description,omitempty"`
+	ThumbnailURL   string    `json:"thumbnail_url,omitempty"`
+	PublishedAt    time.Time `json:"published_at"`
+	Duration       string    `json:"duration,omitempty"`
+	ViewCount      int64     `json:"view_count"`
+	LikeCount      int64     `json:"like_count"`
+}
+
+// CleanYoutubePoint is the output model for process.yt.clean topic
+// Contains validated and cleaned data ready for downstream enrichers
+type CleanYoutubePoint struct {
+	ID             string    `json:"id"`
+	Topic          string    `json:"topic"`
+	SubTopic       string    `json:"subtopic"`
+	FetchTimestamp time.Time `json:"fetch_timestamp"`
+	ContentHash    string    `json:"content_hash"`
+	VideoID        string    `json:"video_id"`
+	ChannelID      string    `json:"channel_id"`
+	ChannelTitle   string    `json:"channel_title"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description,omitempty"`
+	ThumbnailURL   string    `json:"thumbnail_url,omitempty"`
+	PublishedAt    time.Time `json:"published_at"`
+	Duration       string    `json:"duration,omitempty"`
+	ViewCount      int64     `json:"view_count"`
+	LikeCount      int64     `json:"like_count"`
+	// Database reference for downstream enrichers
+	DataPointID string `json:"data_point_id"`
 }
 
 // RawNewsArticle represents the database model for raw news storage
@@ -65,9 +107,9 @@ type DataPoint struct {
 type OutboxEventType string
 
 const (
-	OutboxEventNewsArticleCreated   OutboxEventType = "NewsArticleCreated"
-	OutboxEventRedditPostCreated    OutboxEventType = "RedditPostCreated"
-	OutboxEventYoutubeVideoCreated  OutboxEventType = "YoutubeVideoCreated"
+	OutboxEventNewsArticleCreated  OutboxEventType = "NewsArticleCreated"
+	OutboxEventRedditPostCreated   OutboxEventType = "RedditPostCreated"
+	OutboxEventYoutubeVideoCreated OutboxEventType = "YoutubeVideoCreated"
 )
 
 // OutboxEvent represents an event in the transactional outbox
@@ -77,8 +119,8 @@ type OutboxEvent struct {
 	AggregateType string          `json:"aggregate_type"` // "news", "reddit", "youtube"
 	AggregateID   string          `json:"aggregate_id"`   // The dataPointId
 	EventType     OutboxEventType `json:"event_type"`
-	Topic         string          `json:"topic"`          // Kafka topic to publish to
-	Payload       []byte          `json:"payload"`        // The CleanNewsPoint JSON
+	Topic         string          `json:"topic"`   // Kafka topic to publish to
+	Payload       []byte          `json:"payload"` // The CleanNewsPoint JSON
 	Processed     bool            `json:"processed"`
 	RetryCount    int             `json:"retry_count"`
 	MaxRetries    int             `json:"max_retries"`

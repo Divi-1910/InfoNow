@@ -9,12 +9,19 @@ import (
 )
 
 type Config struct {
-	KafkaBrokers       []string
-	KafkaConsumerGroup string
-	KafkaInputTopic    string
-	KafkaOutputTopic   string
-	DatabaseURL        string
-	BatchSize          int
+	KafkaBrokers         []string
+	KafkaConsumerGroup   string
+	KafkaInputTopic      string
+	KafkaOutputTopic     string
+	YouTubeConsumerGroup string
+	YouTubeInputTopic    string
+	YouTubeOutputTopic   string
+	NewsDLQTopic         string
+	YouTubeDLQTopic      string
+	DatabaseURL          string
+	BatchSize            int
+	ProcessingWorkers    int
+	ProcessingMaxRetries int
 
 	// Outbox publisher settings
 	OutboxPollInterval time.Duration
@@ -46,14 +53,29 @@ func LoadConfig() *Config {
 	if err != nil {
 		outboxMaxRetries = 3
 	}
+	processingWorkers, err := strconv.Atoi(getEnv("PROCESSING_WORKERS", "10"))
+	if err != nil || processingWorkers <= 0 {
+		processingWorkers = 10
+	}
+	processingMaxRetries, err := strconv.Atoi(getEnv("PROCESSING_MAX_RETRIES", "3"))
+	if err != nil || processingMaxRetries <= 0 {
+		processingMaxRetries = 3
+	}
 
 	cfg := &Config{
-		KafkaBrokers:       brokers,
-		KafkaConsumerGroup: getEnv("KAFKA_CONSUMER_GROUP", "transformer-news"),
-		KafkaInputTopic:    getEnv("KAFKA_INPUT_TOPIC", "ingest.news.raw"),
-		KafkaOutputTopic:   getEnv("KAFKA_OUTPUT_TOPIC", "process.news.clean"),
-		DatabaseURL:        getEnv("DATABASE_URL", ""),
-		BatchSize:          batchSize,
+		KafkaBrokers:         brokers,
+		KafkaConsumerGroup:   getEnv("KAFKA_CONSUMER_GROUP", "transformer-news"),
+		KafkaInputTopic:      getEnv("KAFKA_INPUT_TOPIC", "ingest.news.raw"),
+		KafkaOutputTopic:     getEnv("KAFKA_OUTPUT_TOPIC", "process.news.clean"),
+		YouTubeConsumerGroup: getEnv("KAFKA_YT_CONSUMER_GROUP", "transformer-yt"),
+		YouTubeInputTopic:    getEnv("KAFKA_YT_INPUT_TOPIC", "ingest.yt.raw"),
+		YouTubeOutputTopic:   getEnv("KAFKA_YT_OUTPUT_TOPIC", "process.yt.clean"),
+		NewsDLQTopic:         getEnv("KAFKA_NEWS_DLQ_TOPIC", "transformer.news.dlq"),
+		YouTubeDLQTopic:      getEnv("KAFKA_YT_DLQ_TOPIC", "transformer.yt.dlq"),
+		DatabaseURL:          getEnv("DATABASE_URL", "postgresql://Divyansh:dabadebadeba@localhost:6432/info_now_db"),
+		BatchSize:            batchSize,
+		ProcessingWorkers:    processingWorkers,
+		ProcessingMaxRetries: processingMaxRetries,
 
 		OutboxPollInterval: outboxPollInterval,
 		OutboxBatchSize:    outboxBatchSize,

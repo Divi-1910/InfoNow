@@ -43,6 +43,11 @@ type MultiNewsClient struct {
 	clients []*NewsAPIClient
 }
 
+type SubTopicArticle struct {
+	SubTopic models.SubTopic
+	Article  Article
+}
+
 func NewMultiNewsClient(apiKey1, apiKey2, apiKey3 string) *MultiNewsClient {
 	return &MultiNewsClient{
 		clients: []*NewsAPIClient{
@@ -66,8 +71,8 @@ func NewNewsAPIClient(baseURL, apiKey string) *NewsAPIClient {
 	}
 }
 
-func (c *MultiNewsClient) GetArticles(ctx context.Context, subtopics []models.SubTopic) []Article {
-	var articles []Article
+func (c *MultiNewsClient) GetArticles(ctx context.Context, subtopics []models.SubTopic) []SubTopicArticle {
+	var articles []SubTopicArticle
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -87,7 +92,12 @@ func (c *MultiNewsClient) GetArticles(ctx context.Context, subtopics []models.Su
 
 				if len(newArticles) > 0 {
 					mu.Lock()
-					articles = append(articles, newArticles...)
+					for _, article := range newArticles {
+						articles = append(articles, SubTopicArticle{
+							SubTopic: subtopic,
+							Article:  article,
+						})
+					}
 					mu.Unlock()
 				}
 			}

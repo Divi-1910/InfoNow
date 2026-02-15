@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transformer
+  namespace: infonow
+  labels:
+    app: transformer
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: transformer
+  template:
+    metadata:
+      labels:
+        app: transformer
+    spec:
+      containers:
+        - name: transformer
+          image: ghcr.io/your-org/infonow-transformer:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: infonow-secrets
+                  key: DATABASE_URL
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: KAFKA_BROKERS
+            - name: KAFKA_CONSUMER_GROUP
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: KAFKA_TRANSFORMER_NEWS_GROUP
+            - name: KAFKA_INPUT_TOPIC
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: KAFKA_NEWS_INPUT_TOPIC
+            - name: KAFKA_OUTPUT_TOPIC
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: KAFKA_NEWS_OUTPUT_TOPIC
+            - name: KAFKA_YT_CONSUMER_GROUP
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: KAFKA_TRANSFORMER_YT_GROUP
+            - name: KAFKA_YT_INPUT_TOPIC
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: KAFKA_YT_INPUT_TOPIC
+            - name: KAFKA_YT_OUTPUT_TOPIC
+              valueFrom:
+                configMapKeyRef:
+                  name: infonow-config
+                  key: KAFKA_YT_OUTPUT_TOPIC
+            - name: BATCH_SIZE
+              value: "100"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1
+              memory: 1Gi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: transformer
+  namespace: infonow
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: transformer
+  minReplicas: 2
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

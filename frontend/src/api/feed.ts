@@ -57,11 +57,13 @@ export interface YoutubeContent {
   publishedAt: string;
   viewCount: number;
   likeCount: number;
+  duration?: string;
 }
 
 export interface EnrichedInfo {
   summary: string | null;
   hasFullContent: boolean;
+  fullContent?: string | null;
 }
 
 export interface FeedItem {
@@ -114,4 +116,12 @@ export const isRedditContent = (content: FeedItem["content"]): content is Reddit
  */
 export const isYoutubeContent = (content: FeedItem["content"]): content is YoutubeContent => {
   return "videoId" in content && "channelTitle" in content;
+};
+
+/**
+ * Fetch a single feed item with full enriched content
+ */
+export const getFeedItem = async (id: string): Promise<FeedItem> => {
+  const response = await axiosInstance.get<FeedItem>(`/api/feed/${id}`);
+  return response.data;
 };
