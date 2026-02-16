@@ -21,13 +21,13 @@ class PostgresStorage:
     def connect(self):
         """Establish database connection"""
         self.conn = psycopg2.connect(self.database_url)
-        logger.info("Connected to PostgreSQL")
+        logger.info("Connected to PostgreSQL", extra={"event": "postgres_connected"})
 
     def close(self):
         """Close database connection"""
         if self.conn:
             self.conn.close()
-            logger.info("Closed PostgreSQL connection")
+            logger.info("Closed PostgreSQL connection", extra={"event": "postgres_closed"})
 
     def get_topic_by_slug(
         self, topic_slug: str, subtopic_slug: str
@@ -61,7 +61,15 @@ class PostgresStorage:
                     if row:
                         subtopic_id, subtopic_name = row[0], row[1]
         except Exception as e:
-            logger.warning(f"Failed to look up topic slugs: {e}")
+            logger.warning(
+                "Failed to look up topic slugs",
+                extra={
+                    "event": "postgres_topic_lookup_failed",
+                    "topic_slug": topic_slug,
+                    "subtopic_slug": subtopic_slug,
+                    "error": str(e),
+                },
+            )
 
         return topic_id, topic_name, subtopic_id, subtopic_name
 
@@ -150,12 +158,31 @@ class PostgresStorage:
 
                 # 5. Commit all writes atomically
                 self.conn.commit()
-                logger.debug(f"Saved enriched article {enriched_id} with {len(chunks)} chunks")
+                logger.info(
+                    "Saved enriched article and queued outbox events",
+                    extra={
+                        "event": "postgres_enriched_article_saved",
+                        "enriched_article_id": str(enriched_id),
+                        "data_point_id": data_point_id,
+                        "chunk_count": len(chunks),
+                        "embedding_count": len(embeddings),
+                        "has_summary": bool(summary),
+                        "has_chunk_outbox": bool(opensearch_documents and opensearch_index),
+                        "has_mega_outbox": mega_document is not None,
+                    },
+                )
                 return enriched_id
 
         except Exception as e:
             self.conn.rollback()
-            logger.error(f"Error saving enriched article: {e}")
+            logger.error(
+                "Error saving enriched article",
+                extra={
+                    "event": "postgres_enriched_article_save_failed",
+                    "data_point_id": data_point_id,
+                    "error": str(e),
+                },
+            )
             raise
 
     def check_already_enriched(self, data_point_id: str) -> bool:
@@ -172,5 +199,8 @@ class PostgresStorage:
                 )
                 return cur.fetchone()[0]
         except Exception as e:
-            logger.error(f"Error checking enrichment status: {e}")
+            logger.error(
+                "Error checking enrichment status",
+                extra={"event": "postgres_enrichment_check_failed", "data_point_id": data_point_id, "error": str(e)},
+            )
             return False

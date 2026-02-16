@@ -18,12 +18,12 @@ const megaIndexName = "mega_index"
 // MegaPublisher polls DataPointCreated OutboxEvents and writes initial
 // documents to mega_index using op_type=create (so enricher upserts always win).
 type MegaPublisher struct {
-	db           *sql.DB
-	osURL        string
-	interval     time.Duration
-	batch        int
-	maxRetries   int
-	httpClient   *http.Client
+	db         *sql.DB
+	osURL      string
+	interval   time.Duration
+	batch      int
+	maxRetries int
+	httpClient *http.Client
 }
 
 func NewMegaPublisher(db *sql.DB, osURL string, interval time.Duration, batch, maxRetries int) *MegaPublisher {
@@ -39,8 +39,21 @@ func NewMegaPublisher(db *sql.DB, osURL string, interval time.Duration, batch, m
 
 // Start runs the polling loop until context is cancelled.
 func (p *MegaPublisher) Start(ctx context.Context) {
+	slog.Info("mega publisher started",
+		"component", "mega_publisher",
+		"event", "mega_publisher_started",
+		"poll_interval", p.interval.String(),
+		"batch_size", p.batch,
+		"max_retries", p.maxRetries,
+		"opensearch_url", p.osURL,
+	)
+
 	if err := p.ensureIndex(ctx); err != nil {
-		slog.Error("mega_publisher: failed to ensure index", "error", err)
+		slog.Error("failed to ensure mega index",
+			"component", "mega_publisher",
+			"event", "os_index_ensure_failed",
+			"error", err,
+		)
 	}
 
 	ticker := time.NewTicker(p.interval)
@@ -49,12 +62,21 @@ func (p *MegaPublisher) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			slog.Info("mega publisher stopping", "component", "mega_publisher", "event", "mega_publisher_stopping")
 			return
 		case <-ticker.C:
 			if n, err := p.processBatch(ctx); err != nil {
-				slog.Error("mega_publisher: processBatch error", "error", err)
+				slog.Error("mega publisher batch processing failed",
+					"component", "mega_publisher",
+					"event", "mega_batch_failed",
+					"error", err,
+				)
 			} else if n > 0 {
-				slog.Info("mega_publisher: indexed documents", "count", n)
+				slog.Info("mega index upserts completed",
+					"component", "mega_publisher",
+					"event", "mega_batch_processed",
+					"indexed_count", n,
+				)
 			}
 		}
 	}
@@ -103,7 +125,13 @@ func (p *MegaPublisher) processBatch(ctx context.Context) (int, error) {
 	count := 0
 	for _, e := range events {
 		if err := p.indexToOpenSearch(ctx, e.dataPointID, e.payload); err != nil {
-			slog.Warn("mega_publisher: index failed, incrementing retry", "event_id", e.id, "error", err)
+			slog.Warn("mega index write failed, incrementing retry",
+				"component", "mega_publisher",
+				"event", "os_index_failed",
+				"outbox_event_id", e.id,
+				"data_point_id", e.dataPointID,
+				"error", err,
+			)
 			if _, updateErr := tx.ExecContext(ctx,
 				`UPDATE "OutboxEvent" SET "retryCount" = "retryCount" + 1, "lastError" = $1 WHERE id = $2`,
 				err.Error(), e.id,
@@ -146,6 +174,11 @@ func (p *MegaPublisher) indexToOpenSearch(ctx context.Context, dataPointID strin
 
 	if resp.StatusCode == http.StatusConflict {
 		// 409: doc already exists (enricher wrote it first) — not an error
+		slog.Debug("mega index create skipped because document already exists",
+			"component", "mega_publisher",
+			"event", "os_index_conflict_skipped",
+			"data_point_id", dataPointID,
+		)
 		return nil
 	}
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
@@ -175,20 +208,20 @@ func (p *MegaPublisher) ensureIndex(ctx context.Context) error {
 		},
 		"mappings": map[string]any{
 			"properties": map[string]any{
-				"data_point_id":  map[string]any{"type": "keyword"},
-				"source_type":    map[string]any{"type": "keyword"},
+				"data_point_id":   map[string]any{"type": "keyword"},
+				"source_type":     map[string]any{"type": "keyword"},
 				"fetch_timestamp": map[string]any{"type": "date"},
-				"topic_id":       map[string]any{"type": "integer"},
-				"topic_name":     map[string]any{"type": "keyword"},
-				"topic_slug":     map[string]any{"type": "keyword"},
-				"subtopic_id":    map[string]any{"type": "integer"},
-				"subtopic_name":  map[string]any{"type": "keyword"},
-				"subtopic_slug":  map[string]any{"type": "keyword"},
-				"title":          map[string]any{"type": "text", "analyzer": "standard"},
-				"description":    map[string]any{"type": "text", "analyzer": "standard"},
-				"summary":        map[string]any{"type": "text", "analyzer": "standard"},
-				"has_enriched":   map[string]any{"type": "boolean"},
-				"published_at":   map[string]any{"type": "date"},
+				"topic_id":        map[string]any{"type": "integer"},
+				"topic_name":      map[string]any{"type": "keyword"},
+				"topic_slug":      map[string]any{"type": "keyword"},
+				"subtopic_id":     map[string]any{"type": "integer"},
+				"subtopic_name":   map[string]any{"type": "keyword"},
+				"subtopic_slug":   map[string]any{"type": "keyword"},
+				"title":           map[string]any{"type": "text", "analyzer": "standard"},
+				"description":     map[string]any{"type": "text", "analyzer": "standard"},
+				"summary":         map[string]any{"type": "text", "analyzer": "standard"},
+				"has_enriched":    map[string]any{"type": "boolean"},
+				"published_at":    map[string]any{"type": "date"},
 				"source_name": map[string]any{
 					"type":     "text",
 					"analyzer": "standard",
@@ -221,6 +254,10 @@ func (p *MegaPublisher) ensureIndex(ctx context.Context) error {
 	if resp2.StatusCode != http.StatusOK && resp2.StatusCode != http.StatusCreated {
 		return fmt.Errorf("failed to create index, status=%d", resp2.StatusCode)
 	}
-	slog.Info("mega_publisher: created mega_index")
+	slog.Info("created mega index",
+		"component", "mega_publisher",
+		"event", "os_index_created",
+		"index", megaIndexName,
+	)
 	return nil
 }

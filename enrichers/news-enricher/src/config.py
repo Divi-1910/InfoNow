@@ -3,6 +3,10 @@ from typing import List
 
 
 class Settings(BaseSettings):
+    # Logging settings
+    log_level: str = "INFO"
+    log_format: str = "json"
+
     # Kafka settings
     kafka_brokers: str = "localhost:9092"
     kafka_consumer_group: str = "enricher-news"

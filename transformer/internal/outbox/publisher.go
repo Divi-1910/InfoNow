@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"time"
 	"transformer/internal/models"
 
@@ -19,6 +19,7 @@ type Publisher struct {
 	interval   time.Duration
 	batch      int
 	maxRetries int
+	logger     *slog.Logger
 }
 
 // NewPublisher creates a new outbox publisher
@@ -32,13 +33,19 @@ func NewPublisher(db *sql.DB, brokers []string, interval time.Duration, batchSiz
 		interval:   interval,
 		batch:      batchSize,
 		maxRetries: maxRetries,
+		logger: slog.With(
+			"component", "outbox_kafka_publisher",
+			"poll_interval", interval.String(),
+			"batch_size", batchSize,
+			"max_retries", maxRetries,
+		),
 	}
 }
 
 // Start begins the background polling loop
 // Call this in a goroutine: go publisher.Start(ctx)
 func (p *Publisher) Start(ctx context.Context) {
-	log.Printf("Outbox publisher started (interval=%v, batch=%d)", p.interval, p.batch)
+	p.logger.Info("outbox kafka publisher started", "event", "outbox_publisher_started")
 
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
@@ -46,18 +53,21 @@ func (p *Publisher) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Outbox publisher stopping...")
+			p.logger.Info("outbox kafka publisher stopping", "event", "outbox_publisher_stopping")
 			return
 		case <-ticker.C:
-			if err := p.processBatch(ctx); err != nil {
-				log.Printf("Outbox batch processing error: %v", err)
+			count, err := p.processBatch(ctx)
+			if err != nil {
+				p.logger.Error("outbox batch processing failed", "event", "outbox_batch_failed", "error", err)
+			} else if count > 0 {
+				p.logger.Info("outbox batch processed", "event", "outbox_batch_processed", "event_count", count)
 			}
 		}
 	}
 }
 
 // processBatch fetches unprocessed events and publishes them to Kafka
-func (p *Publisher) processBatch(ctx context.Context) error {
+func (p *Publisher) processBatch(ctx context.Context) (int, error) {
 	rows, err := p.db.QueryContext(ctx, `
 		SELECT id, "aggregateId", topic, payload
 		FROM "OutboxEvent"
@@ -70,7 +80,7 @@ func (p *Publisher) processBatch(ctx context.Context) error {
 	`, p.maxRetries, p.batch)
 
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer rows.Close()
 
@@ -79,30 +89,58 @@ func (p *Publisher) processBatch(ctx context.Context) error {
 	for rows.Next() {
 		var event models.OutboxEvent
 		if err := rows.Scan(&event.ID, &event.AggregateID, &event.Topic, &event.Payload); err != nil {
-			return err
+			return 0, err
 		}
 		events = append(events, event)
 	}
 
 	if err := rows.Err(); err != nil {
-		return err
+		return 0, err
+	}
+
+	if len(events) == 0 {
+		return 0, nil
 	}
 
 	for _, event := range events {
 		if err := p.publishToKafka(ctx, event); err != nil {
-			log.Printf("Failed to publish event ID %s: %v", event.ID, err)
+			p.logger.Error("failed to publish outbox event to kafka",
+				"event", "outbox_publish_failed",
+				"outbox_event_id", event.ID,
+				"aggregate_id", event.AggregateID,
+				"kafka_topic", event.Topic,
+				"error", err,
+			)
 			if markErr := p.markFailed(ctx, event.ID, err.Error()); markErr != nil {
-				log.Printf("Failed to mark event ID %s as failed: %v", event.ID, markErr)
+				p.logger.Error("failed to mark outbox event as failed",
+					"event", "outbox_mark_failed_failed",
+					"outbox_event_id", event.ID,
+					"aggregate_id", event.AggregateID,
+					"error", markErr,
+				)
 			}
 			continue
 		}
 
 		if err := p.markProcessed(ctx, event.ID); err != nil {
-			log.Printf("Failed to mark event ID %s as processed: %v", event.ID, err)
+			p.logger.Error("failed to mark outbox event as processed",
+				"event", "outbox_mark_processed_failed",
+				"outbox_event_id", event.ID,
+				"aggregate_id", event.AggregateID,
+				"error", err,
+			)
+			continue
 		}
+
+		p.logger.Debug("outbox event published to kafka",
+			"event", "outbox_publish_succeeded",
+			"outbox_event_id", event.ID,
+			"aggregate_id", event.AggregateID,
+			"kafka_topic", event.Topic,
+		)
 	}
 
-	return nil
+	return len(events), nil
 }
 
 // markProcessed marks an event as successfully processed

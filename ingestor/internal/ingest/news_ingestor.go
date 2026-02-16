@@ -68,7 +68,10 @@ func (n *NewsIngestor) RunWithTopics(ctx context.Context, topics []models.Topic)
 
 		subTopicArticles := n.newsClient.GetArticles(ctx, topic.SubTopics)
 		stats.Fetched += len(subTopicArticles)
-		log.Printf("Topic %s: fetched %d articles", topic.Slug, len(subTopicArticles))
+		log.Printf(
+			"event=news_topic_fetch_done service=ingestor topic_slug=%s subtopic_count=%d fetched=%d",
+			topic.Slug, len(topic.SubTopics), len(subTopicArticles),
+		)
 
 		processedInTopic := 0
 		for _, item := range subTopicArticles {
@@ -94,6 +97,12 @@ func (n *NewsIngestor) RunWithTopics(ctx context.Context, topics []models.Topic)
 
 			if dup {
 				stats.Deduped++
+				if stats.Deduped%100 == 0 {
+					log.Printf(
+						"event=news_dedupe_progress service=ingestor topic_slug=%s deduped_total=%d",
+						topic.Slug, stats.Deduped,
+					)
+				}
 				continue
 			}
 
@@ -119,7 +128,10 @@ func (n *NewsIngestor) RunWithTopics(ctx context.Context, topics []models.Topic)
 			stats.Published++
 			processedInTopic++
 			if processedInTopic%50 == 0 {
-				log.Printf("Topic %s progress: processed=%d published=%d", topic.Slug, processedInTopic, stats.Published)
+				log.Printf(
+					"event=news_topic_progress service=ingestor topic_slug=%s processed_in_topic=%d published_total=%d",
+					topic.Slug, processedInTopic, stats.Published,
+				)
 			}
 		}
 	}

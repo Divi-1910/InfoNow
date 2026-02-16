@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"ingestor/internal/models"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -72,6 +73,8 @@ func NewNewsAPIClient(baseURL, apiKey string) *NewsAPIClient {
 }
 
 func (c *MultiNewsClient) GetArticles(ctx context.Context, subtopics []models.SubTopic) []SubTopicArticle {
+	start := time.Now()
+	log.Printf("event=newsapi_fetch_start service=ingestor subtopic_count=%d worker_count=%d", len(subtopics), len(c.clients))
 	var articles []SubTopicArticle
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -88,7 +91,12 @@ func (c *MultiNewsClient) GetArticles(ctx context.Context, subtopics []models.Su
 		go func(client *NewsAPIClient) {
 			defer wg.Done()
 			for subtopic := range jobChan {
+				subStart := time.Now()
 				newArticles := client.GetAllArticles(ctx, subtopic.Slug)
+				log.Printf(
+					"event=newsapi_subtopic_fetch_ok service=ingestor subtopic_slug=%s article_count=%d latency_ms=%d",
+					subtopic.Slug, len(newArticles), time.Since(subStart).Milliseconds(),
+				)
 
 				if len(newArticles) > 0 {
 					mu.Lock()
@@ -105,6 +113,10 @@ func (c *MultiNewsClient) GetArticles(ctx context.Context, subtopics []models.Su
 	}
 
 	wg.Wait()
+	log.Printf(
+		"event=newsapi_fetch_done service=ingestor subtopic_count=%d article_count=%d latency_ms=%d",
+		len(subtopics), len(articles), time.Since(start).Milliseconds(),
+	)
 	return articles
 }
 
@@ -113,7 +125,7 @@ func (c *NewsAPIClient) GetAllArticles(ctx context.Context, query string) []Arti
 
 	response, err := c.GetEverythingRelevant(ctx, searchQuery)
 	if err != nil {
-		fmt.Printf("Error fetching for %s : %v\n", searchQuery, err)
+		log.Printf("event=newsapi_query_err service=ingestor query=%q error=%q", searchQuery, err.Error())
 		return []Article{}
 	}
 
@@ -144,6 +156,7 @@ func (c *NewsAPIClient) GetEverythingRelevant(ctx context.Context, query string)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		log.Printf("event=newsapi_http_err service=ingestor query=%q status=%d body=%q", query, resp.StatusCode, string(body))
 		return nil, fmt.Errorf("NewsAPI Error : %s", string(body))
 	}
 

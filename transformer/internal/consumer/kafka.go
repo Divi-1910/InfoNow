@@ -3,14 +3,17 @@ package consumer
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"transformer/internal/models"
 
 	"github.com/segmentio/kafka-go"
 )
 
 type KafkaConsumer struct {
-	reader *kafka.Reader
+	reader  *kafka.Reader
+	topic   string
+	groupID string
+	logger  *slog.Logger
 }
 
 func NewKafkaConsumer(brokers []string, topic, groupID string) *KafkaConsumer {
@@ -23,6 +26,13 @@ func NewKafkaConsumer(brokers []string, topic, groupID string) *KafkaConsumer {
 			MaxBytes:       10e6, // 10MB
 			CommitInterval: 0,    // Manual commit
 		}),
+		topic:   topic,
+		groupID: groupID,
+		logger: slog.With(
+			"component", "kafka_consumer",
+			"topic", topic,
+			"group_id", groupID,
+		),
 	}
 }
 
@@ -35,6 +45,12 @@ func (c *KafkaConsumer) FetchOneNews(ctx context.Context) (models.NewsPoint, kaf
 
 	var np models.NewsPoint
 	if err := json.Unmarshal(msg.Value, &np); err != nil {
+		c.logger.Warn("news message unmarshal failed",
+			"event", "kafka_unmarshal_failed",
+			"partition", msg.Partition,
+			"offset", msg.Offset,
+			"error", err,
+		)
 		return models.NewsPoint{}, msg, err
 	}
 
@@ -50,6 +66,12 @@ func (c *KafkaConsumer) FetchOneYouTube(ctx context.Context) (models.YoutubePoin
 
 	var yp models.YoutubePoint
 	if err := json.Unmarshal(msg.Value, &yp); err != nil {
+		c.logger.Warn("youtube message unmarshal failed",
+			"event", "kafka_unmarshal_failed",
+			"partition", msg.Partition,
+			"offset", msg.Offset,
+			"error", err,
+		)
 		return models.YoutubePoint{}, msg, err
 	}
 
@@ -77,10 +99,26 @@ func (c *KafkaConsumer) FetchBatch(ctx context.Context, batchSize int) ([]models
 
 		var np models.NewsPoint
 		if err := json.Unmarshal(msg.Value, &np); err != nil {
-			log.Printf("Failed to unmarshal message: %v", err)
+			c.logger.Warn("news message unmarshal failed",
+				"event", "kafka_unmarshal_failed",
+				"partition", msg.Partition,
+				"offset", msg.Offset,
+				"error", err,
+			)
 			// Commit bad message to skip it
 			if commitErr := c.reader.CommitMessages(ctx, msg); commitErr != nil {
-				log.Printf("Failed to commit bad message: %v", commitErr)
+				c.logger.Error("failed to commit bad news message",
+					"event", "kafka_commit_bad_message_failed",
+					"partition", msg.Partition,
+					"offset", msg.Offset,
+					"error", commitErr,
+				)
+			} else {
+				c.logger.Info("bad news message committed and skipped",
+					"event", "kafka_message_skipped",
+					"partition", msg.Partition,
+					"offset", msg.Offset,
+				)
 			}
 			continue
 		}
@@ -111,9 +149,25 @@ func (c *KafkaConsumer) FetchYouTubeBatch(ctx context.Context, batchSize int) ([
 
 		var yp models.YoutubePoint
 		if err := json.Unmarshal(msg.Value, &yp); err != nil {
-			log.Printf("Failed to unmarshal youtube message: %v", err)
+			c.logger.Warn("youtube message unmarshal failed",
+				"event", "kafka_unmarshal_failed",
+				"partition", msg.Partition,
+				"offset", msg.Offset,
+				"error", err,
+			)
 			if commitErr := c.reader.CommitMessages(ctx, msg); commitErr != nil {
-				log.Printf("Failed to commit bad youtube message: %v", commitErr)
+				c.logger.Error("failed to commit bad youtube message",
+					"event", "kafka_commit_bad_message_failed",
+					"partition", msg.Partition,
+					"offset", msg.Offset,
+					"error", commitErr,
+				)
+			} else {
+				c.logger.Info("bad youtube message committed and skipped",
+					"event", "kafka_message_skipped",
+					"partition", msg.Partition,
+					"offset", msg.Offset,
+				)
 			}
 			continue
 		}
@@ -130,7 +184,20 @@ func (c *KafkaConsumer) CommitMessages(ctx context.Context, messages []kafka.Mes
 	if len(messages) == 0 {
 		return nil
 	}
-	return c.reader.CommitMessages(ctx, messages...)
+	err := c.reader.CommitMessages(ctx, messages...)
+	if err != nil {
+		c.logger.Error("kafka commit failed",
+			"event", "kafka_commit_failed",
+			"message_count", len(messages),
+			"error", err,
+		)
+		return err
+	}
+	c.logger.Debug("kafka commit succeeded",
+		"event", "kafka_commit_succeeded",
+		"message_count", len(messages),
+	)
+	return nil
 }
 
 func (c *KafkaConsumer) Close() error {

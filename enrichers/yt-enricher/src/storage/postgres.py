@@ -19,12 +19,12 @@ class PostgresStorage:
 
     def connect(self):
         self.conn = psycopg2.connect(self.database_url)
-        logger.info("Connected to PostgreSQL")
+        logger.info("Connected to PostgreSQL", extra={"event": "postgres_connected"})
 
     def close(self):
         if self.conn:
             self.conn.close()
-            logger.info("Closed PostgreSQL connection")
+            logger.info("Closed PostgreSQL connection", extra={"event": "postgres_closed"})
 
     def check_already_enriched(self, data_point_id: str) -> bool:
         try:
@@ -39,7 +39,10 @@ class PostgresStorage:
                 )
                 return cur.fetchone()[0]
         except Exception as exc:
-            logger.error("Error checking youtube enrichment status: %s", exc)
+            logger.error(
+                "Error checking youtube enrichment status",
+                extra={"event": "postgres_enrichment_check_failed", "data_point_id": data_point_id, "error": str(exc)},
+            )
             return False
 
     def get_topic_by_slug(
@@ -74,7 +77,15 @@ class PostgresStorage:
                     if row:
                         subtopic_id, subtopic_name = row[0], row[1]
         except Exception as e:
-            logger.warning("Failed to look up topic slugs: %s", e)
+            logger.warning(
+                "Failed to look up topic slugs",
+                extra={
+                    "event": "postgres_topic_lookup_failed",
+                    "topic_slug": topic_slug,
+                    "subtopic_slug": subtopic_slug,
+                    "error": str(e),
+                },
+            )
 
         return topic_id, topic_name, subtopic_id, subtopic_name
 
@@ -156,9 +167,29 @@ class PostgresStorage:
                     )
 
                 self.conn.commit()
+                logger.info(
+                    "Saved enriched youtube video and queued outbox events",
+                    extra={
+                        "event": "postgres_enriched_video_saved",
+                        "enriched_video_id": str(enriched_id),
+                        "data_point_id": data_point_id,
+                        "chunk_count": len(chunks),
+                        "embedding_count": len(embeddings),
+                        "has_summary": bool(summary),
+                        "has_chunk_outbox": bool(opensearch_documents and opensearch_index),
+                        "has_mega_outbox": mega_document is not None,
+                    },
+                )
                 return enriched_id
 
         except Exception as exc:
             self.conn.rollback()
-            logger.error("Error saving enriched youtube video: %s", exc)
+            logger.error(
+                "Error saving enriched youtube video",
+                extra={
+                    "event": "postgres_enriched_video_save_failed",
+                    "data_point_id": data_point_id,
+                    "error": str(exc),
+                },
+            )
             raise

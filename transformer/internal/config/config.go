@@ -30,6 +30,10 @@ type Config struct {
 
 	// OpenSearch settings (for mega_index writes)
 	OpenSearchURL string
+
+	// Logging settings
+	LogLevel  string
+	LogFormat string
 }
 
 func LoadConfig() *Config {
@@ -85,6 +89,9 @@ func LoadConfig() *Config {
 		OutboxMaxRetries:   outboxMaxRetries,
 
 		OpenSearchURL: getEnv("OPENSEARCH_URL", "http://localhost:9200"),
+
+		LogLevel:  strings.ToLower(getEnv("LOG_LEVEL", "info")),
+		LogFormat: strings.ToLower(getEnv("LOG_FORMAT", "json")),
 	}
 
 	if cfg.DatabaseURL == "" {

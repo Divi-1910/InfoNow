@@ -2,7 +2,7 @@ import asyncio
 import logging
 import signal
 import sys
-from datetime import datetime
+import time
 
 from .config import settings
 from .consumer import KafkaConsumer
@@ -13,12 +13,9 @@ from .summarizer import OllamaSummarizer
 from .storage import PostgresStorage, OpenSearchStorage, MegaOpenSearchStorage
 from .models import CleanNewsPoint, OpenSearchDocument, MegaDocument
 from .outbox_publisher import OutboxPublisher
+from .logging_utils import configure_logging
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+configure_logging(settings.log_level, settings.log_format)
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +26,19 @@ class NewsEnricher:
         self.running = True
 
         # Initialize components
-        logger.info("Initializing News Enricher components...")
+        logger.info(
+            "Initializing News Enricher components",
+            extra={
+                "event": "service_initializing",
+                "kafka_input_topic": settings.kafka_input_topic,
+                "kafka_group_id": settings.kafka_consumer_group,
+                "opensearch_index": settings.opensearch_index,
+                "ollama_embed_model": settings.ollama_model,
+                "ollama_summary_model": settings.ollama_summary_model,
+                "log_level": settings.log_level,
+                "log_format": settings.log_format,
+            },
+        )
 
         self.consumer = KafkaConsumer(
             brokers=settings.kafka_brokers_list,
@@ -76,33 +85,73 @@ class NewsEnricher:
         )
         self.outbox_publisher.connect()
 
-        logger.info("All components initialized successfully")
+        logger.info("All components initialized successfully", extra={"event": "service_initialized"})
 
     async def process_article(self, article: CleanNewsPoint) -> bool:
         """Process a single article through the enrichment pipeline"""
+        start = time.perf_counter()
         try:
+            logger.info(
+                "Starting article enrichment",
+                extra={
+                    "event": "article_processing_started",
+                    "data_point_id": article.data_point_id,
+                    "topic": article.topic,
+                    "subtopic": article.subtopic,
+                    "url": article.url,
+                },
+            )
+
             # Check if already enriched
             if self.postgres.check_already_enriched(article.data_point_id):
-                logger.debug(f"Article {article.data_point_id} already enriched, skipping")
+                logger.info(
+                    "Article already enriched, skipping",
+                    extra={"event": "article_skipped_already_enriched", "data_point_id": article.data_point_id},
+                )
                 return True
 
             # Step 1: Scrape full content
-            logger.debug(f"Scraping {article.url}")
+            step_start = time.perf_counter()
             full_content = await self.scraper.scrape(article.url)
 
             if not full_content:
-                logger.warning(f"Failed to scrape content for {article.url}")
+                logger.warning(
+                    "Failed to scrape article content",
+                    extra={"event": "article_scrape_failed", "data_point_id": article.data_point_id, "url": article.url},
+                )
                 return False
+            logger.info(
+                "Article content scraped",
+                extra={
+                    "event": "article_scraped",
+                    "data_point_id": article.data_point_id,
+                    "duration_ms": int((time.perf_counter() - step_start) * 1000),
+                    "content_chars": len(full_content),
+                },
+            )
 
             # Step 2: Chunk the content
+            step_start = time.perf_counter()
             chunks = self.chunker.chunk(full_content)
             if not chunks:
-                logger.warning(f"No chunks created for {article.url}")
+                logger.warning(
+                    "No chunks created for article",
+                    extra={"event": "article_chunking_failed", "data_point_id": article.data_point_id},
+                )
                 return False
 
-            logger.debug(f"Created {len(chunks)} chunks")
+            logger.info(
+                "Article chunked",
+                extra={
+                    "event": "article_chunked",
+                    "data_point_id": article.data_point_id,
+                    "chunk_count": len(chunks),
+                    "duration_ms": int((time.perf_counter() - step_start) * 1000),
+                },
+            )
 
             # Step 3: Generate embeddings
+            step_start = time.perf_counter()
             chunk_texts = [chunk.content for chunk in chunks]
             embeddings = self.embedder.embed_batch(chunk_texts)
 
@@ -115,8 +164,21 @@ class NewsEnricher:
                     valid_embeddings.append(embedding)
 
             if not valid_chunks:
-                logger.warning(f"No valid embeddings for {article.url}")
+                logger.warning(
+                    "No valid embeddings generated",
+                    extra={"event": "article_embedding_failed", "data_point_id": article.data_point_id},
+                )
                 return False
+            logger.info(
+                "Generated embeddings",
+                extra={
+                    "event": "article_embedded",
+                    "data_point_id": article.data_point_id,
+                    "requested_embeddings": len(chunks),
+                    "valid_embeddings": len(valid_embeddings),
+                    "duration_ms": int((time.perf_counter() - step_start) * 1000),
+                },
+            )
 
             # Look up topic/subtopic IDs and names by slug
             topic_id, topic_name, subtopic_id, subtopic_name = self.postgres.get_topic_by_slug(
@@ -124,11 +186,22 @@ class NewsEnricher:
             )
 
             # Step 4: Generate summary
+            step_start = time.perf_counter()
             summary = await asyncio.to_thread(
                 self.summarizer.summarize,
                 article.title,
                 full_content,
                 settings.summary_input_max_chars,
+            )
+            logger.info(
+                "Generated summary",
+                extra={
+                    "event": "article_summarized",
+                    "data_point_id": article.data_point_id,
+                    "has_summary": bool(summary),
+                    "summary_chars": len(summary) if summary else 0,
+                    "duration_ms": int((time.perf_counter() - step_start) * 1000),
+                },
             )
 
             # Build OpenSearch chunk documents for news_index outbox
@@ -195,20 +268,35 @@ class NewsEnricher:
             )
 
             logger.info(
-                f"Enriched article: {article.title[:50]}... "
-                f"({len(valid_chunks)} chunks queued for indexing)"
+                "Article enrichment completed",
+                extra={
+                    "event": "article_processing_completed",
+                    "data_point_id": article.data_point_id,
+                    "chunk_count": len(valid_chunks),
+                    "summary_chars": len(summary) if summary else 0,
+                    "duration_ms": int((time.perf_counter() - start) * 1000),
+                },
             )
             return True
 
         except Exception as e:
-            logger.error(f"Error processing article {article.url}: {e}")
+            logger.error(
+                "Error processing article",
+                extra={
+                    "event": "article_processing_failed",
+                    "data_point_id": article.data_point_id,
+                    "url": article.url,
+                    "error": str(e),
+                    "duration_ms": int((time.perf_counter() - start) * 1000),
+                },
+            )
             return False
 
     async def run(self):
         """Main processing loop"""
         # Start outbox publisher as background task
         outbox_task = asyncio.create_task(self.outbox_publisher.start())
-        logger.info("Starting enrichment loop...")
+        logger.info("Starting enrichment loop", extra={"event": "service_loop_started"})
 
         while self.running:
             try:
@@ -220,19 +308,23 @@ class NewsEnricher:
                 success = await self.process_article(article)
                 if success:
                     self.consumer.commit()
-                    logger.info(f"Processed and committed article: {article.data_point_id}")
+                    logger.info(
+                        "Processed and committed article",
+                        extra={"event": "article_committed", "data_point_id": article.data_point_id},
+                    )
                 else:
                     logger.warning(
-                        f"Processing failed for article {article.data_point_id}, offset not committed"
+                        "Processing failed, offset not committed",
+                        extra={"event": "article_not_committed", "data_point_id": article.data_point_id},
                     )
 
             except Exception as e:
-                logger.error(f"Error in processing loop: {e}")
+                logger.error("Error in processing loop", extra={"event": "service_loop_error", "error": str(e)})
                 await asyncio.sleep(5)
 
     def shutdown(self):
         """Graceful shutdown"""
-        logger.info("Shutting down...")
+        logger.info("Shutting down", extra={"event": "service_shutdown_started"})
         self.running = False
         self.outbox_publisher.stop()
         self.outbox_publisher.close()
@@ -240,7 +332,7 @@ class NewsEnricher:
         self.postgres.close()
         self.opensearch.close()
         self.mega_opensearch.close()
-        logger.info("Shutdown complete")
+        logger.info("Shutdown complete", extra={"event": "service_shutdown_completed"})
 
 
 def main():

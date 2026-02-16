@@ -32,7 +32,10 @@ class OpenSearchStorage:
     def create_index_if_not_exists(self):
         """Create the index with proper mappings if it doesn't exist"""
         if self.client.indices.exists(index=self.index_name):
-            logger.info(f"Index {self.index_name} already exists")
+            logger.info(
+                "OpenSearch index already exists",
+                extra={"event": "opensearch_index_exists", "index": self.index_name},
+            )
             return
 
         index_body = {
@@ -84,7 +87,10 @@ class OpenSearchStorage:
         }
 
         self.client.indices.create(index=self.index_name, body=index_body)
-        logger.info(f"Created index {self.index_name}")
+        logger.info(
+            "Created OpenSearch index",
+            extra={"event": "opensearch_index_created", "index": self.index_name},
+        )
 
     def index_documents(self, documents: List[OpenSearchDocument]):
         """Bulk index documents to OpenSearch"""
@@ -102,12 +108,26 @@ class OpenSearchStorage:
 
         try:
             success, failed = helpers.bulk(self.client, actions, raise_on_error=False)
-            logger.info(f"Indexed {success} documents, {len(failed)} failed")
+            logger.info(
+                "Indexed chunk documents in OpenSearch",
+                extra={
+                    "event": "opensearch_bulk_indexed",
+                    "index": self.index_name,
+                    "success_count": success,
+                    "failed_count": len(failed),
+                },
+            )
             if failed:
                 for item in failed[:5]:
-                    logger.error(f"Failed to index: {item}")
+                    logger.error(
+                        "Failed to index chunk document",
+                        extra={"event": "opensearch_bulk_item_failed", "index": self.index_name, "item": item},
+                    )
         except Exception as e:
-            logger.error(f"Error bulk indexing: {e}")
+            logger.error(
+                "Error during OpenSearch bulk indexing",
+                extra={"event": "opensearch_bulk_failed", "index": self.index_name, "error": str(e)},
+            )
             raise
 
     def close(self):
@@ -129,8 +149,20 @@ class MegaOpenSearchStorage:
                 id=doc.data_point_id,
                 body=doc.model_dump(mode="json"),
             )
+            logger.debug(
+                "Upserted mega document",
+                extra={"event": "opensearch_mega_upserted", "index": MEGA_INDEX, "data_point_id": doc.data_point_id},
+            )
         except Exception as e:
-            logger.error(f"Failed to upsert mega doc {doc.data_point_id}: {e}")
+            logger.error(
+                "Failed to upsert mega document",
+                extra={
+                    "event": "opensearch_mega_upsert_failed",
+                    "index": MEGA_INDEX,
+                    "data_point_id": doc.data_point_id,
+                    "error": str(e),
+                },
+            )
             raise
 
     def close(self):

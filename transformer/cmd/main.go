@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
@@ -23,23 +23,44 @@ type messageKey struct {
 }
 
 type processOutcome struct {
-	index     int
-	ack       bool
-	retriable bool
-	reason    string
+	index       int
+	ack         bool
+	retriable   bool
+	reason      string
+	dataPointID string
 }
 
 func main() {
-	log.Println("Starting Transformer Service")
-
 	cfg := config.LoadConfig()
+
+	logger := setupLogger(cfg)
+	slog.SetDefault(logger)
+
+	logger.Info("starting transformer service",
+		"event", "service_starting",
+		"kafka_brokers", cfg.KafkaBrokers,
+		"news_input_topic", cfg.KafkaInputTopic,
+		"news_output_topic", cfg.KafkaOutputTopic,
+		"yt_input_topic", cfg.YouTubeInputTopic,
+		"yt_output_topic", cfg.YouTubeOutputTopic,
+		"news_dlq_topic", cfg.NewsDLQTopic,
+		"yt_dlq_topic", cfg.YouTubeDLQTopic,
+		"batch_size", cfg.BatchSize,
+		"processing_workers", cfg.ProcessingWorkers,
+		"processing_max_retries", cfg.ProcessingMaxRetries,
+		"outbox_poll_interval", cfg.OutboxPollInterval.String(),
+		"outbox_batch_size", cfg.OutboxBatchSize,
+		"outbox_max_retries", cfg.OutboxMaxRetries,
+		"opensearch_url", cfg.OpenSearchURL,
+	)
 
 	store, err := storage.NewPostgresStorage(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		logger.Error("failed to connect to postgres", "event", "postgres_connect_failed", "error", err)
+		os.Exit(1)
 	}
 	defer store.Close()
-	log.Println("Connected to PostgreSQL")
+	logger.Info("connected to postgres", "event", "postgres_connected")
 
 	newsConsumer := consumer.NewKafkaConsumer(
 		cfg.KafkaBrokers,
@@ -47,7 +68,11 @@ func main() {
 		cfg.KafkaConsumerGroup,
 	)
 	defer newsConsumer.Close()
-	log.Printf("Kafka consumer initialized for topic: %s", cfg.KafkaInputTopic)
+	logger.Info("initialized kafka consumer",
+		"event", "kafka_consumer_initialized",
+		"topic", cfg.KafkaInputTopic,
+		"group_id", cfg.KafkaConsumerGroup,
+	)
 
 	ytConsumer := consumer.NewKafkaConsumer(
 		cfg.KafkaBrokers,
@@ -55,7 +80,11 @@ func main() {
 		cfg.YouTubeConsumerGroup,
 	)
 	defer ytConsumer.Close()
-	log.Printf("Kafka consumer initialized for topic: %s", cfg.YouTubeInputTopic)
+	logger.Info("initialized kafka consumer",
+		"event", "kafka_consumer_initialized",
+		"topic", cfg.YouTubeInputTopic,
+		"group_id", cfg.YouTubeConsumerGroup,
+	)
 
 	outboxPublisher := outbox.NewPublisher(
 		store.DB(),
@@ -65,8 +94,7 @@ func main() {
 		cfg.OutboxMaxRetries,
 	)
 	defer outboxPublisher.Close()
-	log.Printf("Outbox publisher initialized (interval=%v, batch=%d, maxRetries=%d)",
-		cfg.OutboxPollInterval, cfg.OutboxBatchSize, cfg.OutboxMaxRetries)
+	logger.Info("initialized kafka outbox publisher", "event", "outbox_publisher_initialized")
 
 	megaPublisher := outbox.NewMegaPublisher(
 		store.DB(),
@@ -75,7 +103,10 @@ func main() {
 		cfg.OutboxBatchSize,
 		cfg.OutboxMaxRetries,
 	)
-	log.Printf("Mega publisher initialized (opensearch=%s)", cfg.OpenSearchURL)
+	logger.Info("initialized mega publisher",
+		"event", "mega_publisher_initialized",
+		"opensearch_url", cfg.OpenSearchURL,
+	)
 
 	newsProcessor := processor.NewNewsProcessor()
 	ytProcessor := processor.NewYouTubeProcessor()
@@ -89,15 +120,15 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		<-sigChan
-		log.Println("Shutdown signal received, stopping...")
+		sig := <-sigChan
+		logger.Warn("shutdown signal received", "event", "shutdown_signal", "signal", sig.String())
 		cancel()
 	}()
 
 	go outboxPublisher.Start(ctx)
 	go megaPublisher.Start(ctx)
 
-	log.Println("Starting message processing loops")
+	logger.Info("starting processing loops", "event", "processing_loops_starting")
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -112,6 +143,35 @@ func main() {
 	}()
 
 	wg.Wait()
+	logger.Info("transformer stopped", "event", "service_stopped")
+}
+
+func setupLogger(cfg *config.Config) *slog.Logger {
+	var level slog.Level
+	switch cfg.LogLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	handlerOpts := &slog.HandlerOptions{
+		Level:     level,
+		AddSource: false,
+	}
+
+	var handler slog.Handler
+	if cfg.LogFormat == "text" {
+		handler = slog.NewTextHandler(os.Stdout, handlerOpts)
+	} else {
+		handler = slog.NewJSONHandler(os.Stdout, handlerOpts)
+	}
+
+	return slog.New(handler).With("service", "transformer")
 }
 
 func processNewsMessages(
@@ -122,13 +182,14 @@ func processNewsMessages(
 	proc *processor.NewsProcessor,
 	dlqProducer *dlq.Producer,
 ) {
+	logger := slog.With("component", "news_pipeline", "input_topic", cfg.KafkaInputTopic)
 	tracker := offsets.NewTracker()
 	retryCounts := make(map[messageKey]int)
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Context cancelled, exiting news processing loop")
+			logger.Info("news pipeline stopping", "event", "pipeline_stopping")
 			return
 		default:
 		}
@@ -144,13 +205,15 @@ func processNewsMessages(
 			if err == context.DeadlineExceeded || err == context.Canceled {
 				continue
 			}
-			log.Printf("Error fetching news messages: %v", err)
+			logger.Error("news kafka fetch failed", "event", "kafka_fetch_failed", "error", err)
 			time.Sleep(time.Second)
 			continue
 		}
 		if len(newsPoints) == 0 {
 			continue
 		}
+
+		logger.Info("news batch fetched", "event", "kafka_batch_fetched", "message_count", len(newsPoints))
 
 		outcomes := make([]processOutcome, 0, len(newsPoints))
 		results := make(chan processOutcome, len(newsPoints))
@@ -178,15 +241,16 @@ func processNewsMessages(
 					return
 				}
 				if exists {
-					results <- processOutcome{index: i, ack: true, retriable: false}
+					results <- processOutcome{index: i, ack: true, retriable: false, reason: "duplicate"}
 					return
 				}
 
-				if _, err := store.SaveNewsArticleWithOutbox(ctx, result.Cleaned, cfg.KafkaOutputTopic); err != nil {
+				dataPointID, err := store.SaveNewsArticleWithOutbox(ctx, result.Cleaned, cfg.KafkaOutputTopic)
+				if err != nil {
 					results <- processOutcome{index: i, ack: false, retriable: true, reason: "db save failed"}
 					return
 				}
-				results <- processOutcome{index: i, ack: true, retriable: false}
+				results <- processOutcome{index: i, ack: true, retriable: false, reason: "saved", dataPointID: dataPointID}
 			}()
 		}
 		wg.Wait()
@@ -196,6 +260,12 @@ func processNewsMessages(
 			outcomes = append(outcomes, outcome)
 		}
 
+		savedCount := 0
+		duplicateCount := 0
+		validationFailedCount := 0
+		retryQueuedCount := 0
+		dlqCount := 0
+
 		for _, outcome := range outcomes {
 			msg := messages[outcome.index]
 			key := messageKey{partition: msg.Partition, offset: msg.Offset}
@@ -203,14 +273,41 @@ func processNewsMessages(
 			if outcome.ack {
 				delete(retryCounts, key)
 				tracker.Ack(msg)
+				if outcome.reason == "saved" {
+					savedCount++
+					logger.Info("news article persisted and queued to outbox",
+						"event", "news_saved",
+						"partition", msg.Partition,
+						"offset", msg.Offset,
+						"data_point_id", outcome.dataPointID,
+					)
+				} else {
+					duplicateCount++
+					logger.Debug("news article skipped as duplicate",
+						"event", "news_duplicate",
+						"partition", msg.Partition,
+						"offset", msg.Offset,
+					)
+				}
 				continue
 			}
 
 			if outcome.retriable {
 				retryCounts[key]++
 				if retryCounts[key] < cfg.ProcessingMaxRetries {
+					retryQueuedCount++
+					logger.Warn("news processing failed, will retry",
+						"event", "news_retry_scheduled",
+						"partition", msg.Partition,
+						"offset", msg.Offset,
+						"attempt", retryCounts[key],
+						"max_retries", cfg.ProcessingMaxRetries,
+						"reason", outcome.reason,
+					)
 					continue
 				}
+			} else {
+				validationFailedCount++
 			}
 
 			reason := outcome.reason
@@ -231,17 +328,41 @@ func processNewsMessages(
 				Payload:     msg.Value,
 			})
 			if err != nil {
-				log.Printf("Failed to publish news DLQ event partition=%d offset=%d: %v", msg.Partition, msg.Offset, err)
+				logger.Error("failed to publish news dlq event",
+					"event", "dlq_publish_failed",
+					"partition", msg.Partition,
+					"offset", msg.Offset,
+					"error", err,
+				)
 				continue
 			}
+
+			dlqCount++
+			logger.Warn("news message sent to dlq",
+				"event", "dlq_published",
+				"partition", msg.Partition,
+				"offset", msg.Offset,
+				"attempts", attempts,
+				"reason", reason,
+			)
 
 			delete(retryCounts, key)
 			tracker.Ack(msg)
 		}
 
 		if err := tracker.CommitReady(ctx, kafkaConsumer.CommitMessages); err != nil {
-			log.Printf("Error committing contiguous news offsets: %v", err)
+			logger.Error("failed to commit contiguous news offsets", "event", "kafka_commit_frontier_failed", "error", err)
 		}
+
+		logger.Info("news batch processed",
+			"event", "news_batch_processed",
+			"message_count", len(outcomes),
+			"saved_count", savedCount,
+			"duplicate_count", duplicateCount,
+			"validation_failed_count", validationFailedCount,
+			"retry_queued_count", retryQueuedCount,
+			"dlq_count", dlqCount,
+		)
 	}
 }
 
@@ -253,13 +374,14 @@ func processYouTubeMessages(
 	proc *processor.YouTubeProcessor,
 	dlqProducer *dlq.Producer,
 ) {
+	logger := slog.With("component", "youtube_pipeline", "input_topic", cfg.YouTubeInputTopic)
 	tracker := offsets.NewTracker()
 	retryCounts := make(map[messageKey]int)
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Context cancelled, exiting youtube processing loop")
+			logger.Info("youtube pipeline stopping", "event", "pipeline_stopping")
 			return
 		default:
 		}
@@ -275,13 +397,15 @@ func processYouTubeMessages(
 			if err == context.DeadlineExceeded || err == context.Canceled {
 				continue
 			}
-			log.Printf("Error fetching youtube messages: %v", err)
+			logger.Error("youtube kafka fetch failed", "event", "kafka_fetch_failed", "error", err)
 			time.Sleep(time.Second)
 			continue
 		}
 		if len(ytPoints) == 0 {
 			continue
 		}
+
+		logger.Info("youtube batch fetched", "event", "kafka_batch_fetched", "message_count", len(ytPoints))
 
 		outcomes := make([]processOutcome, 0, len(ytPoints))
 		results := make(chan processOutcome, len(ytPoints))
@@ -309,15 +433,16 @@ func processYouTubeMessages(
 					return
 				}
 				if exists {
-					results <- processOutcome{index: i, ack: true, retriable: false}
+					results <- processOutcome{index: i, ack: true, retriable: false, reason: "duplicate"}
 					return
 				}
 
-				if _, err := store.SaveYoutubeVideoWithOutbox(ctx, result.Cleaned, cfg.YouTubeOutputTopic); err != nil {
+				dataPointID, err := store.SaveYoutubeVideoWithOutbox(ctx, result.Cleaned, cfg.YouTubeOutputTopic)
+				if err != nil {
 					results <- processOutcome{index: i, ack: false, retriable: true, reason: "db save failed"}
 					return
 				}
-				results <- processOutcome{index: i, ack: true, retriable: false}
+				results <- processOutcome{index: i, ack: true, retriable: false, reason: "saved", dataPointID: dataPointID}
 			}()
 		}
 		wg.Wait()
@@ -327,6 +452,12 @@ func processYouTubeMessages(
 			outcomes = append(outcomes, outcome)
 		}
 
+		savedCount := 0
+		duplicateCount := 0
+		validationFailedCount := 0
+		retryQueuedCount := 0
+		dlqCount := 0
+
 		for _, outcome := range outcomes {
 			msg := messages[outcome.index]
 			key := messageKey{partition: msg.Partition, offset: msg.Offset}
@@ -334,14 +465,41 @@ func processYouTubeMessages(
 			if outcome.ack {
 				delete(retryCounts, key)
 				tracker.Ack(msg)
+				if outcome.reason == "saved" {
+					savedCount++
+					logger.Info("youtube video persisted and queued to outbox",
+						"event", "youtube_saved",
+						"partition", msg.Partition,
+						"offset", msg.Offset,
+						"data_point_id", outcome.dataPointID,
+					)
+				} else {
+					duplicateCount++
+					logger.Debug("youtube video skipped as duplicate",
+						"event", "youtube_duplicate",
+						"partition", msg.Partition,
+						"offset", msg.Offset,
+					)
+				}
 				continue
 			}
 
 			if outcome.retriable {
 				retryCounts[key]++
 				if retryCounts[key] < cfg.ProcessingMaxRetries {
+					retryQueuedCount++
+					logger.Warn("youtube processing failed, will retry",
+						"event", "youtube_retry_scheduled",
+						"partition", msg.Partition,
+						"offset", msg.Offset,
+						"attempt", retryCounts[key],
+						"max_retries", cfg.ProcessingMaxRetries,
+						"reason", outcome.reason,
+					)
 					continue
 				}
+			} else {
+				validationFailedCount++
 			}
 
 			reason := outcome.reason
@@ -362,16 +520,40 @@ func processYouTubeMessages(
 				Payload:     msg.Value,
 			})
 			if err != nil {
-				log.Printf("Failed to publish youtube DLQ event partition=%d offset=%d: %v", msg.Partition, msg.Offset, err)
+				logger.Error("failed to publish youtube dlq event",
+					"event", "dlq_publish_failed",
+					"partition", msg.Partition,
+					"offset", msg.Offset,
+					"error", err,
+				)
 				continue
 			}
+
+			dlqCount++
+			logger.Warn("youtube message sent to dlq",
+				"event", "dlq_published",
+				"partition", msg.Partition,
+				"offset", msg.Offset,
+				"attempts", attempts,
+				"reason", reason,
+			)
 
 			delete(retryCounts, key)
 			tracker.Ack(msg)
 		}
 
 		if err := tracker.CommitReady(ctx, kafkaConsumer.CommitMessages); err != nil {
-			log.Printf("Error committing contiguous youtube offsets: %v", err)
+			logger.Error("failed to commit contiguous youtube offsets", "event", "kafka_commit_frontier_failed", "error", err)
 		}
+
+		logger.Info("youtube batch processed",
+			"event", "youtube_batch_processed",
+			"message_count", len(outcomes),
+			"saved_count", savedCount,
+			"duplicate_count", duplicateCount,
+			"validation_failed_count", validationFailedCount,
+			"retry_queued_count", retryQueuedCount,
+			"dlq_count", dlqCount,
+		)
 	}
 }

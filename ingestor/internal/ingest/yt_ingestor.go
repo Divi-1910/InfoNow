@@ -10,6 +10,7 @@ import (
 	"ingestor/internal/producer"
 	"ingestor/internal/runner"
 	"log"
+	"time"
 )
 
 type YTIngestor struct {
@@ -17,6 +18,7 @@ type YTIngestor struct {
 	youtubeClient *client.YouTubeClient
 	deduper       *deduper.Deduper
 	producer      *producer.KafkaProducer
+	opTimeout     time.Duration
 }
 
 func NewYTIngestor(
@@ -24,12 +26,14 @@ func NewYTIngestor(
 	yt *client.YouTubeClient,
 	dup *deduper.Deduper,
 	prod *producer.KafkaProducer,
+	opTimeout time.Duration,
 ) *YTIngestor {
 	return &YTIngestor{
 		backendClient: backend,
 		youtubeClient: yt,
 		deduper:       dup,
 		producer:      prod,
+		opTimeout:     opTimeout,
 	}
 }
 
@@ -61,7 +65,10 @@ func (y *YTIngestor) RunWithTopics(ctx context.Context, topics []models.Topic) C
 
 		subTopicVideos := y.youtubeClient.GetVideos(ctx, topic.SubTopics)
 		stats.Fetched += len(subTopicVideos)
-		log.Printf("Topic %s: fetched %d youtube videos", topic.Slug, len(subTopicVideos))
+		log.Printf(
+			"event=youtube_topic_fetch_done service=ingestor topic_slug=%s subtopic_count=%d fetched=%d",
+			topic.Slug, len(topic.SubTopics), len(subTopicVideos),
+		)
 
 		for _, item := range subTopicVideos {
 			dataID, err := identity.YoutubeDataID(item.Video.VideoID)
@@ -70,7 +77,9 @@ func (y *YTIngestor) RunWithTopics(ctx context.Context, topics []models.Topic) C
 				continue
 			}
 
-			dup, err := y.deduper.IsDuplicate(ctx, dataID)
+			opCtx, cancel := context.WithTimeout(ctx, y.opTimeout)
+			dup, err := y.deduper.IsDuplicate(opCtx, dataID)
+			cancel()
 			if err != nil {
 				log.Printf("Deduper failed for %s, skipping: %v", dataID, err)
 				continue
@@ -78,6 +87,12 @@ func (y *YTIngestor) RunWithTopics(ctx context.Context, topics []models.Topic) C
 
 			if dup {
 				stats.Deduped++
+				if stats.Deduped%100 == 0 {
+					log.Printf(
+						"event=youtube_dedupe_progress service=ingestor topic_slug=%s deduped_total=%d",
+						topic.Slug, stats.Deduped,
+					)
+				}
 				continue
 			}
 
@@ -87,12 +102,21 @@ func (y *YTIngestor) RunWithTopics(ctx context.Context, topics []models.Topic) C
 				continue
 			}
 
-			if err := y.producer.PublishYoutube(ctx, yp); err != nil {
+			opCtx, cancel = context.WithTimeout(ctx, y.opTimeout)
+			if err := y.producer.PublishYoutube(opCtx, yp); err != nil {
+				cancel()
 				log.Printf("Failed to publish youtube %s: %v", yp.ID, err)
 				continue
 			}
+			cancel()
 
 			stats.Published++
+			if stats.Published%50 == 0 {
+				log.Printf(
+					"event=youtube_publish_progress service=ingestor topic_slug=%s published_total=%d",
+					topic.Slug, stats.Published,
+				)
+			}
 		}
 	}
 

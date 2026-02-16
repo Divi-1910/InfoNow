@@ -11,6 +11,7 @@ import (
 	"ingestor/internal/producer"
 	"ingestor/internal/redis"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -66,7 +67,13 @@ func New(cfg *config.Config) *Service {
 		cfg.NewsMaxPerTopic,
 		cfg.OperationTimeout,
 	)
-	ytIngestor := ingest.NewYTIngestor(backendClient, ytClient, dup, kafkaProducer)
+	ytIngestor := ingest.NewYTIngestor(
+		backendClient,
+		ytClient,
+		dup,
+		kafkaProducer,
+		cfg.OperationTimeout,
+	)
 
 	return &Service{
 		cfg:           cfg,
@@ -124,8 +131,21 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 
 	switch normalizedSource {
 	case SourceAll:
-		newsStats := s.newsIngestor.RunWithTopics(ctx, topics)
-		ytStats := s.ytIngestor.RunWithTopics(ctx, topics)
+		var wg sync.WaitGroup
+		var newsStats ingest.CycleStats
+		var ytStats ingest.CycleStats
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			newsStats = s.newsIngestor.RunWithTopics(ctx, topics)
+		}()
+		go func() {
+			defer wg.Done()
+			ytStats = s.ytIngestor.RunWithTopics(ctx, topics)
+		}()
+		wg.Wait()
+
 		result.News = &newsStats
 		result.YouTube = &ytStats
 	case SourceNews:

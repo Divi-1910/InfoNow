@@ -33,31 +33,36 @@ class OutboxPublisher:
 
     def connect(self):
         self.conn = psycopg2.connect(self.database_url)
-        logger.info("Outbox publisher connected to PostgreSQL")
+        logger.info("Outbox publisher connected to PostgreSQL", extra={"event": "outbox_postgres_connected"})
 
     def close(self):
         if self.conn:
             self.conn.close()
-            logger.info("Outbox publisher closed PostgreSQL connection")
+            logger.info("Outbox publisher closed PostgreSQL connection", extra={"event": "outbox_postgres_closed"})
 
     def stop(self):
         self.running = False
+        logger.info("Outbox publisher stopping", extra={"event": "outbox_publisher_stopping"})
 
     async def start(self):
         self.running = True
         logger.info(
-            "Outbox publisher started (interval=%ss, batch=%d)",
-            self.poll_interval,
-            self.batch_size,
+            "Outbox publisher started",
+            extra={
+                "event": "outbox_publisher_started",
+                "poll_interval_seconds": self.poll_interval,
+                "batch_size": self.batch_size,
+                "max_retries": self.max_retries,
+            },
         )
 
         while self.running:
             try:
                 processed = await self.process_batch()
                 if processed > 0:
-                    logger.info("Outbox publisher processed %d events", processed)
+                    logger.info("Outbox batch processed", extra={"event": "outbox_batch_processed", "processed_count": processed})
             except Exception as exc:
-                logger.error("Outbox publisher error: %s", exc)
+                logger.error("Outbox publisher error", extra={"event": "outbox_batch_failed", "error": str(exc)})
                 try:
                     self.conn.rollback()
                 except Exception:
@@ -87,6 +92,8 @@ class OutboxPublisher:
                 (self.max_retries, self.batch_size),
             )
             rows = cur.fetchall()
+            if rows:
+                logger.debug("Claimed outbox rows", extra={"event": "outbox_rows_claimed", "row_count": len(rows)})
 
             for row in rows:
                 event_id, event_type, payload = row
@@ -100,10 +107,23 @@ class OutboxPublisher:
                             (datetime.utcnow(), event_id),
                         )
                         processed_count += 1
+                        logger.debug(
+                            "Processed YoutubeVideoEnriched outbox event",
+                            extra={
+                                "event": "outbox_event_processed",
+                                "outbox_event_id": str(event_id),
+                                "event_type": event_type,
+                                "document_count": len(docs),
+                            },
+                        )
                     else:
                         cur.execute(
                             'UPDATE "OutboxEvent" SET "retryCount" = "retryCount" + 1, "lastError" = %s WHERE id = %s',
                             ("Failed to index youtube chunks", event_id),
+                        )
+                        logger.warning(
+                            "Failed processing YoutubeVideoEnriched outbox event",
+                            extra={"event": "outbox_event_failed", "outbox_event_id": str(event_id), "event_type": event_type},
                         )
 
                 elif event_type == "YoutubeVideoEnrichedMega":
@@ -114,10 +134,23 @@ class OutboxPublisher:
                             (datetime.utcnow(), event_id),
                         )
                         processed_count += 1
+                        logger.debug(
+                            "Processed YoutubeVideoEnrichedMega outbox event",
+                            extra={
+                                "event": "outbox_event_processed",
+                                "outbox_event_id": str(event_id),
+                                "event_type": event_type,
+                                "data_point_id": mega_doc.data_point_id,
+                            },
+                        )
                     else:
                         cur.execute(
                             'UPDATE "OutboxEvent" SET "retryCount" = "retryCount" + 1, "lastError" = %s WHERE id = %s',
                             ("Failed to upsert to mega_index", event_id),
+                        )
+                        logger.warning(
+                            "Failed processing YoutubeVideoEnrichedMega outbox event",
+                            extra={"event": "outbox_event_failed", "outbox_event_id": str(event_id), "event_type": event_type},
                         )
 
         self.conn.commit()
@@ -128,7 +161,10 @@ class OutboxPublisher:
             self.opensearch.index_documents(docs)
             return True
         except Exception as exc:
-            logger.error("Failed indexing youtube chunks: %s", exc)
+            logger.error(
+                "Failed indexing youtube chunks",
+                extra={"event": "outbox_chunk_index_failed", "document_count": len(docs), "error": str(exc)},
+            )
             return False
 
     def _upsert_mega(self, doc: MegaDocument) -> bool:
@@ -136,5 +172,8 @@ class OutboxPublisher:
             self.mega_opensearch.upsert_document(doc)
             return True
         except Exception as exc:
-            logger.error("Failed to upsert mega doc: %s", exc)
+            logger.error(
+                "Failed to upsert mega doc",
+                extra={"event": "outbox_mega_upsert_failed", "data_point_id": doc.data_point_id, "error": str(exc)},
+            )
             return False

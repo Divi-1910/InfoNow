@@ -40,28 +40,34 @@ class OutboxPublisher:
     def connect(self):
         """Establish database connection"""
         self.conn = psycopg2.connect(self.database_url)
-        logger.info("Outbox publisher connected to PostgreSQL")
+        logger.info("Outbox publisher connected to PostgreSQL", extra={"event": "outbox_postgres_connected"})
 
     def close(self):
         """Close database connection"""
         if self.conn:
             self.conn.close()
-            logger.info("Outbox publisher closed PostgreSQL connection")
+            logger.info("Outbox publisher closed PostgreSQL connection", extra={"event": "outbox_postgres_closed"})
 
     async def start(self):
         """Start the background polling loop"""
         self.running = True
         logger.info(
-            f"Outbox publisher started (interval={self.poll_interval}s, batch={self.batch_size})"
+            "Outbox publisher started",
+            extra={
+                "event": "outbox_publisher_started",
+                "poll_interval_seconds": self.poll_interval,
+                "batch_size": self.batch_size,
+                "max_retries": self.max_retries,
+            },
         )
 
         while self.running:
             try:
                 processed = await self.process_batch()
                 if processed > 0:
-                    logger.info(f"Outbox publisher processed {processed} events")
+                    logger.info("Outbox batch processed", extra={"event": "outbox_batch_processed", "processed_count": processed})
             except Exception as e:
-                logger.error(f"Outbox publisher error: {e}")
+                logger.error("Outbox publisher error", extra={"event": "outbox_batch_failed", "error": str(e)})
                 try:
                     self.conn.rollback()
                 except Exception:
@@ -72,7 +78,7 @@ class OutboxPublisher:
     def stop(self):
         """Stop the polling loop"""
         self.running = False
-        logger.info("Outbox publisher stopping...")
+        logger.info("Outbox publisher stopping", extra={"event": "outbox_publisher_stopping"})
 
     async def process_batch(self) -> int:
         """
@@ -100,6 +106,8 @@ class OutboxPublisher:
                 (self.max_retries, self.batch_size),
             )
             rows = cur.fetchall()
+            if rows:
+                logger.debug("Claimed outbox rows", extra={"event": "outbox_rows_claimed", "row_count": len(rows)})
 
             for row in rows:
                 event_id, aggregate_id, event_type, topic, payload = row
@@ -113,10 +121,31 @@ class OutboxPublisher:
                             (datetime.utcnow(), event_id),
                         )
                         processed_count += 1
+                        logger.debug(
+                            "Processed NewsArticleEnriched outbox event",
+                            extra={
+                                "event": "outbox_event_processed",
+                                "outbox_event_id": str(event_id),
+                                "aggregate_id": aggregate_id,
+                                "event_type": event_type,
+                                "topic": topic,
+                                "document_count": len(documents),
+                            },
+                        )
                     else:
                         cur.execute(
                             'UPDATE "OutboxEvent" SET "retryCount" = "retryCount" + 1, "lastError" = %s WHERE id = %s',
                             ("Failed to index chunks to OpenSearch", event_id),
+                        )
+                        logger.warning(
+                            "Failed processing NewsArticleEnriched outbox event",
+                            extra={
+                                "event": "outbox_event_failed",
+                                "outbox_event_id": str(event_id),
+                                "aggregate_id": aggregate_id,
+                                "event_type": event_type,
+                                "topic": topic,
+                            },
                         )
 
                 elif event_type == "NewsArticleEnrichedMega":
@@ -127,10 +156,31 @@ class OutboxPublisher:
                             (datetime.utcnow(), event_id),
                         )
                         processed_count += 1
+                        logger.debug(
+                            "Processed NewsArticleEnrichedMega outbox event",
+                            extra={
+                                "event": "outbox_event_processed",
+                                "outbox_event_id": str(event_id),
+                                "aggregate_id": aggregate_id,
+                                "event_type": event_type,
+                                "topic": topic,
+                                "data_point_id": mega_doc.data_point_id,
+                            },
+                        )
                     else:
                         cur.execute(
                             'UPDATE "OutboxEvent" SET "retryCount" = "retryCount" + 1, "lastError" = %s WHERE id = %s',
                             ("Failed to upsert to mega_index", event_id),
+                        )
+                        logger.warning(
+                            "Failed processing NewsArticleEnrichedMega outbox event",
+                            extra={
+                                "event": "outbox_event_failed",
+                                "outbox_event_id": str(event_id),
+                                "aggregate_id": aggregate_id,
+                                "event_type": event_type,
+                                "topic": topic,
+                            },
                         )
 
         self.conn.commit()
@@ -142,7 +192,10 @@ class OutboxPublisher:
             self.opensearch.index_documents(documents)
             return True
         except Exception as e:
-            logger.error(f"Failed to index chunks to OpenSearch: {e}")
+            logger.error(
+                "Failed to index chunk documents to OpenSearch",
+                extra={"event": "outbox_chunk_index_failed", "document_count": len(documents), "error": str(e)},
+            )
             return False
 
     def _upsert_mega(self, doc: MegaDocument) -> bool:
@@ -151,5 +204,8 @@ class OutboxPublisher:
             self.mega_opensearch.upsert_document(doc)
             return True
         except Exception as e:
-            logger.error(f"Failed to upsert mega doc: {e}")
+            logger.error(
+                "Failed to upsert mega doc",
+                extra={"event": "outbox_mega_upsert_failed", "data_point_id": doc.data_point_id, "error": str(e)},
+            )
             return False

@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"ingestor/internal/models"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -95,20 +97,47 @@ func NewYouTubeClient(apiKey string, maxResults int) *YouTubeClient {
 }
 
 func (c *YouTubeClient) GetVideos(ctx context.Context, subtopics []models.SubTopic) []SubTopicVideo {
+	start := time.Now()
+	log.Printf("event=youtube_fetch_start service=ingestor subtopic_count=%d", len(subtopics))
 	videos := make([]SubTopicVideo, 0)
-	for _, subtopic := range subtopics {
-		subtopicVideos := c.searchVideosByQuery(ctx, subtopic.Slug)
-		for _, video := range subtopicVideos {
-			videos = append(videos, SubTopicVideo{
-				SubTopic: subtopic,
-				Video:    video,
-			})
-		}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, st := range subtopics {
+		subtopic := st
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			subStart := time.Now()
+			subtopicVideos := c.searchVideosByQuery(ctx, subtopic.Slug)
+			log.Printf(
+				"event=youtube_subtopic_fetch_ok service=ingestor subtopic_slug=%s video_count=%d latency_ms=%d",
+				subtopic.Slug, len(subtopicVideos), time.Since(subStart).Milliseconds(),
+			)
+
+			if len(subtopicVideos) == 0 {
+				return
+			}
+			mu.Lock()
+			for _, video := range subtopicVideos {
+				videos = append(videos, SubTopicVideo{
+					SubTopic: subtopic,
+					Video:    video,
+				})
+			}
+			mu.Unlock()
+		}()
 	}
+	wg.Wait()
+
+	log.Printf(
+		"event=youtube_fetch_done service=ingestor subtopic_count=%d video_count=%d latency_ms=%d",
+		len(subtopics), len(videos), time.Since(start).Milliseconds(),
+	)
 	return videos
 }
 
 func (c *YouTubeClient) searchVideosByQuery(ctx context.Context, query string) []YouTubeVideo {
+	start := time.Now()
 	searchQuery := strings.ReplaceAll(query, "-", " ")
 	u, _ := url.Parse(c.BaseURL + "/search")
 	q := u.Query()
@@ -122,26 +151,32 @@ func (c *YouTubeClient) searchVideosByQuery(ctx context.Context, query string) [
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
+		log.Printf("event=youtube_search_err service=ingestor query=%q error=%q", searchQuery, err.Error())
 		return []YouTubeVideo{}
 	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		log.Printf("event=youtube_search_err service=ingestor query=%q error=%q", searchQuery, err.Error())
 		return []YouTubeVideo{}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("event=youtube_search_http_err service=ingestor query=%q status=%d body=%q", searchQuery, resp.StatusCode, string(body))
 		return []YouTubeVideo{}
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("event=youtube_search_err service=ingestor query=%q error=%q", searchQuery, err.Error())
 		return []YouTubeVideo{}
 	}
 
 	var searchResp youtubeSearchResponse
 	if err := json.Unmarshal(body, &searchResp); err != nil {
+		log.Printf("event=youtube_search_err service=ingestor query=%q error=%q", searchQuery, err.Error())
 		return []YouTubeVideo{}
 	}
 
@@ -181,6 +216,10 @@ func (c *YouTubeClient) searchVideosByQuery(ctx context.Context, query string) [
 		})
 	}
 
+	log.Printf(
+		"event=youtube_search_ok service=ingestor query=%q result_count=%d latency_ms=%d",
+		searchQuery, len(videos), time.Since(start).Milliseconds(),
+	)
 	return videos
 }
 

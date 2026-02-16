@@ -3,6 +3,10 @@ from typing import List
 
 
 class Settings(BaseSettings):
+    # Logging settings
+    log_level: str = "INFO"
+    log_format: str = "json"
+
     # Kafka settings
     kafka_brokers: str = "localhost:9092"
     kafka_consumer_group: str = "enricher-yt"
@@ -25,6 +29,7 @@ class Settings(BaseSettings):
     # Processing settings
     max_chunk_tokens: int = 512
     batch_size: int = 10
+    transcript_languages: str = "en,en-US"
 
     # Outbox publisher settings
     outbox_poll_interval: float = 1.0
