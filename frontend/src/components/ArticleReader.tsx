@@ -23,6 +23,7 @@ import {
 import type { FeedItem } from "@/api/feed";
 import { useToggleSave } from "@/hooks/useToggleSave";
 import { formatDuration, formatCompactNumber } from "@/lib/format";
+import { getApiErrorMessage } from "@/lib/errors";
 
 export const ArticleReader = () => {
   const [itemId, setItemId] = useAtom(readerItemIdAtom);
@@ -40,14 +41,16 @@ export const ArticleReader = () => {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setItem(null);
 
     getFeedItem(itemId)
       .then((data) => {
         if (!cancelled) setItem(data);
       })
       .catch((err) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : "Failed to load");
+        if (!cancelled) {
+          setError(getApiErrorMessage(err, "Failed to load content"));
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -225,8 +228,8 @@ export const ArticleReader = () => {
               </div>
             )}
 
-            {/* Full content */}
-            {item.enriched?.fullContent && (
+            {/* Full content (hidden for YouTube; summary-only for video entries) */}
+            {item.enriched?.fullContent && !isYoutubeContent(item.content) && (
               <div className="prose prose-invert prose-sm max-w-none">
                 {item.enriched.fullContent.split("\n").map((p, i) =>
                   p.trim() ? (

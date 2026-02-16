@@ -49,6 +49,11 @@ class NewsEnricher:
         self.scraper = ArticleScraper(
             max_concurrent=settings.scraper_workers,
             timeout=settings.scraper_timeout_seconds,
+            max_retries=settings.scraper_max_retries,
+            backoff_seconds=settings.scraper_backoff_seconds,
+            min_content_chars=settings.scraper_min_content_chars,
+            user_agent=settings.scraper_user_agent,
+            extractor_order=[e.strip() for e in settings.scraper_extractor_order.split(",") if e.strip()],
         )
 
         self.chunker = HybridChunker(max_tokens=settings.max_chunk_tokens)

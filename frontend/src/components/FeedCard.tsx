@@ -72,7 +72,8 @@ export const FeedCard = ({
   const setReaderItemId = useSetAtom(readerItemIdAtom);
 
   const handleClick = () => {
-    if (item.enriched?.hasFullContent || isYoutubeContent(item.content)) {
+    const hasSummary = Boolean(item.enriched?.summary);
+    if (hasSummary || item.enriched?.hasFullContent || isYoutubeContent(item.content)) {
       setReaderItemId(item.id);
     } else {
       window.open(info.url, "_blank");

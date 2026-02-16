@@ -109,7 +109,8 @@ export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
   }, [query]);
 
   const handleSelect = (item: FeedItem) => {
-    if (item.enriched?.hasFullContent || isYoutubeContent(item.content)) {
+    const hasSummary = Boolean(item.enriched?.summary);
+    if (hasSummary || item.enriched?.hasFullContent || isYoutubeContent(item.content)) {
       setReaderItemId(item.id);
     } else {
       window.open(getUrl(item), "_blank");

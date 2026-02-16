@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     max_chunk_tokens: int = 512
     scraper_workers: int = 10
     scraper_timeout_seconds: int = 10
+    scraper_max_retries: int = 2
+    scraper_backoff_seconds: float = 0.75
+    scraper_min_content_chars: int = 100
+    scraper_user_agent: str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    scraper_extractor_order: str = "trafilatura,heuristic"
     batch_size: int = 10
 
     # Outbox publisher settings

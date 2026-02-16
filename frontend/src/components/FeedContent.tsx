@@ -27,11 +27,13 @@ import FeedCardSkeleton from "@/components/FeedCardSkeleton";
 import DateRangePicker from "@/components/DateRangePicker";
 import { useToggleSave } from "@/hooks/useToggleSave";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { getApiErrorMessage } from "@/lib/errors";
 
 export const FeedContent = () => {
   const [userTopics, setUserTopics] = useState<any[]>([]);
   const [selectedTopic, setSelectedTopic] = useState<string>("All");
   const [selectedType, setSelectedType] = useState<DataType | "All">("All");
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 
   const [feedItems, setFeedItems] = useAtom(feedItemsAtom);
   const [filters] = useAtom(feedFiltersAtom);
@@ -46,9 +48,13 @@ export const FeedContent = () => {
   const { toggleSave, savedIds } = useToggleSave();
 
   useEffect(() => {
-    getUserPreferences().then((data) => {
-      setUserTopics(data.topics);
-    });
+    getUserPreferences()
+      .then((data) => {
+        setUserTopics(data.topics);
+      })
+      .catch(() => {
+        setUserTopics([]);
+      });
   }, []);
 
   const fetchFeed = useCallback(
@@ -56,9 +62,11 @@ export const FeedContent = () => {
       if (isLoadMore) {
         if (!hasMore || loadingMore) return;
         setLoadingMore(true);
+        setLoadMoreError(null);
       } else {
         setLoading(true);
         setError(null);
+        setLoadMoreError(null);
       }
 
       try {
@@ -77,7 +85,12 @@ export const FeedContent = () => {
         setCursor(response.pagination.nextCursor);
         setHasMore(response.pagination.hasMore);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to fetch feed");
+        const message = getApiErrorMessage(err, "Failed to fetch feed");
+        if (isLoadMore) {
+          setLoadMoreError(message);
+        } else {
+          setError(message);
+        }
       } finally {
         setLoading(false);
         setLoadingMore(false);
@@ -105,7 +118,7 @@ export const FeedContent = () => {
 
   const feedSentinelRef = useInfiniteScroll({
     onLoadMore: () => fetchFeed(true),
-    hasMore,
+    hasMore: hasMore && !loadMoreError,
     loading: loadingMore,
     rootMargin: "200px",
   });
@@ -240,6 +253,21 @@ export const FeedContent = () => {
         ))}
 
         <div ref={feedSentinelRef} />
+        {loadMoreError && (
+          <div className="flex flex-col items-center justify-center py-4 text-red-400 gap-3">
+            <div className="flex items-center justify-center">
+              <AlertCircle className="w-5 h-5 mr-2" />
+              <span className="text-sm">{loadMoreError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchFeed(true)}
+              className="px-3 py-1.5 rounded-full text-xs font-light bg-zinc-800/60 border border-zinc-700 hover:bg-zinc-700 text-gray-200 transition-colors"
+            >
+              Retry loading more
+            </button>
+          </div>
+        )}
         {loadingMore && (
           <div className="flex items-center justify-center py-6">
             <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
