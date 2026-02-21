@@ -1,18 +1,33 @@
+import { useCallback, useMemo } from "react";
 import { useAtom } from "jotai";
 import { addToastAtom } from "@/store/toastAtom";
 
 export const useToast = () => {
   const [, addToast] = useAtom(addToastAtom);
 
-  return {
-    success: (message: string) => {
+  const success = useCallback(
+    (message: string) => {
       addToast({ type: "success", message });
     },
-    error: (message: string) => {
+    [addToast]
+  );
+
+  const error = useCallback(
+    (message: string) => {
       addToast({ type: "error", message });
     },
-    info: (message: string) => {
+    [addToast]
+  );
+
+  const info = useCallback(
+    (message: string) => {
       addToast({ type: "info", message });
     },
-  };
+    [addToast]
+  );
+
+  return useMemo(
+    () => ({ success, error, info }),
+    [success, error, info]
+  );
 };

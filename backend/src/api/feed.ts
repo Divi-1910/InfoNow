@@ -6,9 +6,19 @@ import { prisma } from "../lib/prisma.js";
 import { getOpenSearchClient, MEGA_INDEX } from "../lib/opensearch.js";
 import { hitToFeedItem } from "../lib/megaTransform.js";
 import { logger } from "../utils/logger.js";
-import type { DataType } from "@prisma/client";
 
 const feedRouter = Router();
+type SmartSort = [number, number, string];
+type RecentSort = [boolean, number, string];
+type BlendSource = "news" | "youtube";
+
+type BlendCursor = {
+  v: 2;
+  mode: "blend";
+  news: SmartSort | null;
+  youtube: SmartSort | null;
+  nextSource: BlendSource;
+};
 
 /**
  * Optional auth middleware - populates req.user if authenticated,
@@ -47,6 +57,7 @@ const optionalAuthMiddleware = (
  * - cursor: opaque base64url string from previous response
  * - limit: number - items per page (default: 20, max: 50)
  * - sortOrder: 'asc' | 'desc' (default: desc)
+ * - strategy: 'smart' | 'recent' (default: smart)
  */
 feedRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Response) => {
   try {
@@ -60,13 +71,17 @@ feedRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Respon
       cursor,
       limit = "20",
       sortOrder = "desc",
+      strategy = "smart",
     } = req.query;
 
     const limitNum = Math.min(Math.max(parseInt(limit as string) || 20, 1), 50);
     const order = sortOrder === "asc" ? "asc" : "desc";
+    const rankingStrategy = strategy === "recent" ? "recent" : "smart";
     const feedMode = (mode as string) || (req.user ? "personalized" : "browse");
 
     const filter: any[] = [];
+    let subscribedTopicIds: number[] = [];
+    let subscribedSubTopicIds: number[] = [];
 
     // Personalized mode: OR filter across topic and subtopic subscriptions
     if (feedMode === "personalized" && req.user) {
@@ -83,6 +98,8 @@ feedRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Respon
 
       const topicIds = userTopics.map((ut) => ut.topicId);
       const subTopicIds = userSubTopics.map((ust) => ust.subTopicId);
+      subscribedTopicIds = topicIds;
+      subscribedSubTopicIds = subTopicIds;
 
       if (topicIds.length === 0 && subTopicIds.length === 0) {
         return res.status(200).json({
@@ -120,42 +137,237 @@ feedRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Respon
       });
     }
 
-    // Decode cursor (search_after: [epochMs, data_point_id])
-    let searchAfter: [number, string] | undefined;
-    if (cursor) {
+    const decodeCursor = () => {
+      if (!cursor) return null;
       try {
-        const decoded = JSON.parse(
+        return JSON.parse(
           Buffer.from(cursor as string, "base64url").toString("utf-8")
-        ) as [number, string];
-        if (Array.isArray(decoded) && decoded.length === 2) {
-          searchAfter = decoded;
-        }
+        ) as unknown;
       } catch {
-        // Stale or invalid cursor — start fresh
+        return null;
+      }
+    };
+
+    // Smart mode without explicit type filter uses two-stream blending.
+    const explicitType = (type as string | undefined)?.toLowerCase();
+    const shouldBlendSources = rankingStrategy === "smart" && !explicitType;
+    const decodedCursor = decodeCursor();
+
+    const os = getOpenSearchClient();
+    const should: any[] = [];
+    if (rankingStrategy === "smart") {
+      should.push({ term: { has_enriched: { value: true, boost: 4.0 } } });
+      if (subscribedSubTopicIds.length > 0) {
+        should.push({
+          terms: {
+            subtopic_id: subscribedSubTopicIds,
+            boost: 3.0,
+          },
+        });
+      }
+      if (subscribedTopicIds.length > 0) {
+        should.push({
+          terms: {
+            topic_id: subscribedTopicIds,
+            boost: 2.0,
+          },
+        });
       }
     }
 
-    const os = getOpenSearchClient();
-    const osBody: any = {
-      query: { bool: { filter } },
-      size: limitNum + 1,
-      sort: [{ fetch_timestamp: { order } }, { data_point_id: { order } }],
+    const baseQuery: any = {
+      bool: {
+        filter,
+        ...(should.length > 0 ? { should, minimum_should_match: 0 } : {}),
+      },
     };
-    if (searchAfter) {
-      osBody.search_after = searchAfter;
-    }
+    const buildSmartQuery = (extraFilter: any[] = []) => ({
+      function_score: {
+        query: {
+          bool: {
+            filter: [...filter, ...extraFilter],
+            ...(should.length > 0 ? { should, minimum_should_match: 0 } : {}),
+          },
+        },
+        functions: [
+          {
+            gauss: {
+              fetch_timestamp: {
+                origin: "now",
+                scale: "3d",
+                offset: "6h",
+                decay: 0.5,
+              },
+            },
+            weight: 1.5,
+          },
+        ],
+        score_mode: "sum",
+        boost_mode: "sum",
+      },
+    });
 
-    const result = await os.search({ index: MEGA_INDEX, body: osBody });
-    const hits: any[] = result.body?.hits?.hits ?? [];
-
-    const hasMore = hits.length > limitNum;
-    const pageHits = hasMore ? hits.slice(0, -1) : hits;
-
-    // Build next cursor from last hit's sort values
+    let pageHits: any[] = [];
+    let hasMore = false;
     let nextCursor: string | null = null;
-    if (hasMore && pageHits.length > 0) {
-      const lastSort = pageHits[pageHits.length - 1].sort as [number, string];
-      nextCursor = Buffer.from(JSON.stringify(lastSort)).toString("base64url");
+
+    if (shouldBlendSources) {
+      const blendCursor: BlendCursor | null =
+        decodedCursor &&
+        typeof decodedCursor === "object" &&
+        !Array.isArray(decodedCursor) &&
+        (decodedCursor as any).mode === "blend" &&
+        (decodedCursor as any).v === 2
+          ? (decodedCursor as BlendCursor)
+          : null;
+
+      const perSourceSize = limitNum + 1;
+      const [newsResult, ytResult] = await Promise.all([
+        os.search({
+          index: MEGA_INDEX,
+          body: {
+            query: buildSmartQuery([{ term: { source_type: "news" } }]) as any,
+            size: perSourceSize,
+            sort: [
+              { _score: { order: "desc" } },
+              { fetch_timestamp: { order } },
+              { data_point_id: { order } },
+            ],
+            ...(blendCursor?.news ? { search_after: blendCursor.news } : {}),
+          },
+        }),
+        os.search({
+          index: MEGA_INDEX,
+          body: {
+            query: buildSmartQuery([{ term: { source_type: "youtube" } }]) as any,
+            size: perSourceSize,
+            sort: [
+              { _score: { order: "desc" } },
+              { fetch_timestamp: { order } },
+              { data_point_id: { order } },
+            ],
+            ...(blendCursor?.youtube ? { search_after: blendCursor.youtube } : {}),
+          },
+        }),
+      ]);
+
+      const newsHits: any[] = newsResult.body?.hits?.hits ?? [];
+      const ytHits: any[] = ytResult.body?.hits?.hits ?? [];
+      const newsHasMore = newsHits.length === perSourceSize;
+      const ytHasMore = ytHits.length === perSourceSize;
+
+      let ni = 0;
+      let yi = 0;
+      const merged: any[] = [];
+      let nextSource: BlendSource = blendCursor?.nextSource ?? "news";
+
+      while (
+        merged.length < limitNum + 1 &&
+        (ni < newsHits.length || yi < ytHits.length)
+      ) {
+        if (nextSource === "news") {
+          if (ni < newsHits.length) {
+            merged.push(newsHits[ni++]);
+            nextSource = "youtube";
+          } else if (yi < ytHits.length) {
+            merged.push(ytHits[yi++]);
+          }
+        } else {
+          if (yi < ytHits.length) {
+            merged.push(ytHits[yi++]);
+            nextSource = "news";
+          } else if (ni < newsHits.length) {
+            merged.push(newsHits[ni++]);
+          }
+        }
+      }
+
+      hasMore = merged.length > limitNum || newsHasMore || ytHasMore;
+      pageHits = merged.slice(0, limitNum);
+
+      if (hasMore) {
+        const newsConsumed = pageHits.filter(
+          (h) => h._source?.source_type === "news"
+        );
+        const ytConsumed = pageHits.filter(
+          (h) => h._source?.source_type === "youtube"
+        );
+        const lastNewsSort = newsConsumed.length
+          ? (newsConsumed[newsConsumed.length - 1].sort as SmartSort)
+          : blendCursor?.news ?? null;
+        const lastYoutubeSort = ytConsumed.length
+          ? (ytConsumed[ytConsumed.length - 1].sort as SmartSort)
+          : blendCursor?.youtube ?? null;
+        const cursorPayload: BlendCursor = {
+          v: 2,
+          mode: "blend",
+          news: lastNewsSort,
+          youtube: lastYoutubeSort,
+          nextSource,
+        };
+        nextCursor = Buffer.from(JSON.stringify(cursorPayload)).toString(
+          "base64url"
+        );
+      }
+    } else {
+      let searchAfter: [number | boolean, number, string] | undefined;
+      if (Array.isArray(decodedCursor) && decodedCursor.length === 3) {
+        const [first, second, third] = decodedCursor;
+        const isValidRecentCursor =
+          rankingStrategy === "recent" &&
+          typeof first === "boolean" &&
+          typeof second === "number" &&
+          typeof third === "string";
+        const isValidSmartCursor =
+          rankingStrategy === "smart" &&
+          typeof first === "number" &&
+          typeof second === "number" &&
+          typeof third === "string";
+        if (isValidRecentCursor || isValidSmartCursor) {
+          searchAfter = decodedCursor as [number | boolean, number, string];
+        }
+      }
+
+      const osBody: any = {
+        query: rankingStrategy === "smart" ? (buildSmartQuery() as any) : baseQuery,
+        size: limitNum + 1,
+        sort:
+          rankingStrategy === "smart"
+            ? [
+                { _score: { order: "desc" } },
+                { fetch_timestamp: { order } },
+                { data_point_id: { order } },
+              ]
+            : [
+                {
+                  has_enriched: {
+                    order: "desc",
+                    missing: "_last",
+                    unmapped_type: "boolean",
+                  },
+                },
+                { fetch_timestamp: { order } },
+                { data_point_id: { order } },
+              ],
+      };
+      if (searchAfter) {
+        osBody.search_after = searchAfter;
+      }
+
+      const result = await os.search({ index: MEGA_INDEX, body: osBody });
+      const hits: any[] = result.body?.hits?.hits ?? [];
+
+      hasMore = hits.length > limitNum;
+      pageHits = hasMore ? hits.slice(0, -1) : hits;
+
+      if (hasMore && pageHits.length > 0) {
+        const lastSort = pageHits[pageHits.length - 1].sort as
+          | SmartSort
+          | RecentSort;
+        nextCursor = Buffer.from(JSON.stringify(lastSort)).toString(
+          "base64url"
+        );
+      }
     }
 
     // Resolve isSaved

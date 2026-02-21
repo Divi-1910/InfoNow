@@ -9,10 +9,20 @@ export interface TrendingParams {
   type?: DataType;
   limit?: number;
   timeRange?: TimeRange;
+  topicLimit?: number;
+}
+
+export interface TrendingTopic {
+  id: number;
+  name: string;
+  slug: string;
+  count: number;
+  score: number;
 }
 
 export interface TrendingResponse {
   items: FeedItem[];
+  trendingTopics: TrendingTopic[];
   pagination: FeedPagination;
   timeRange: TimeRange;
 }

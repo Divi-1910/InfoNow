@@ -67,19 +67,14 @@ export const ArticleReader = () => {
     const c = item.content;
     if (isNewsContent(c)) return c.url;
     if (isRedditContent(c)) return `https://reddit.com${c.permalink}`;
-    if (isYoutubeContent(c))
-      return `https://youtube.com/watch?v=${c.videoId}`;
+    if (isYoutubeContent(c)) return `https://youtube.com/watch?v=${c.videoId}`;
     return "#";
   };
 
   const isSaved = itemId ? savedIds.has(itemId) : false;
 
   return (
-    <Modal
-      isOpen={!!itemId}
-      onClose={handleClose}
-      size="xl"
-    >
+    <Modal isOpen={!!itemId} onClose={handleClose} size="xl">
       {loading && (
         <div className="flex items-center justify-center py-24">
           <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
@@ -239,7 +234,7 @@ export const ArticleReader = () => {
                     >
                       {p}
                     </p>
-                  ) : null
+                  ) : null,
                 )}
               </div>
             )}
@@ -257,30 +252,8 @@ export const ArticleReader = () => {
                       >
                         {p}
                       </p>
-                    ) : null
+                    ) : null,
                   )}
-                </div>
-              )}
-
-            {/* No content fallback */}
-            {!item.enriched?.fullContent &&
-              !(
-                isRedditContent(item.content) && item.content.selftext
-              ) &&
-              !isYoutubeContent(item.content) && (
-                <div className="text-center py-8 text-gray-500">
-                  <p className="text-sm font-light mb-3">
-                    Full content not available
-                  </p>
-                  <a
-                    href={getExternalUrl(item)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Read on original site
-                  </a>
                 </div>
               )}
           </div>

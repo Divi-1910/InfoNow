@@ -54,6 +54,8 @@ class NewsEnricher:
             min_content_chars=settings.scraper_min_content_chars,
             user_agent=settings.scraper_user_agent,
             extractor_order=[e.strip() for e in settings.scraper_extractor_order.split(",") if e.strip()],
+            blocked_domains=[d.strip() for d in settings.scraper_blocked_domains.split(",") if d.strip()],
+            blocked_path_keywords=[k.strip() for k in settings.scraper_blocked_path_keywords.split(",") if k.strip()],
         )
 
         self.chunker = HybridChunker(max_tokens=settings.max_chunk_tokens)

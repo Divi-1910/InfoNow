@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Bookmark, Eye, ThumbsUp, Clock, BookOpen } from "lucide-react";
+import { Bookmark, Eye, ThumbsUp, Clock, BookOpen, MessageSquare, ArrowUpRight } from "lucide-react";
 import { useSetAtom } from "jotai";
 import type { FeedItem } from "../api/feed";
 import { isNewsContent, isRedditContent, isYoutubeContent } from "../api/feed";
@@ -14,7 +14,6 @@ interface FeedCardProps {
   showSavedAt?: boolean;
 }
 
-// Helper to get item display info
 const getItemInfo = (item: FeedItem) => {
   const content = item.content;
   if (isNewsContent(content)) {
@@ -42,10 +41,9 @@ const getItemInfo = (item: FeedItem) => {
       time: formatRelativeTime(content.publishedAt),
     };
   }
-  return { title: "", source: "", image: null, url: "#", time: "" };
+  return { title: "Unknown", source: "", image: null, url: "#", time: "" };
 };
 
-// Format relative time (e.g., "2 min ago", "1h ago")
 const formatRelativeTime = (dateString: string): string => {
   const date = new Date(dateString);
   const now = new Date();
@@ -55,10 +53,28 @@ const formatRelativeTime = (dateString: string): string => {
   const diffDays = Math.floor(diffHours / 24);
 
   if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins} min ago`;
+  if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return date.toLocaleDateString();
+};
+
+const typeConfig = {
+  News: { color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/20", label: "News" },
+  Reddit: { color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20", label: "Reddit" },
+  Youtube: { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20", label: "YouTube" },
+};
+
+const typeFallbackBg = {
+  News: "bg-sky-950/40",
+  Reddit: "bg-orange-950/40",
+  Youtube: "bg-red-950/40",
+};
+
+const typeFallbackIcon = {
+  News: "📰",
+  Reddit: "💬",
+  Youtube: "🎬",
 };
 
 export const FeedCard = ({
@@ -70,6 +86,7 @@ export const FeedCard = ({
 }: FeedCardProps) => {
   const info = getItemInfo(item);
   const setReaderItemId = useSetAtom(readerItemIdAtom);
+  const typeStyle = typeConfig[item.type] ?? typeConfig.News;
 
   const handleClick = () => {
     const hasSummary = Boolean(item.enriched?.summary);
@@ -82,114 +99,128 @@ export const FeedCard = ({
 
   return (
     <motion.article
-      key={item.id}
-      initial={{ opacity: 0, y: 30 }}
+      initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: Math.min(0.2 + index * 0.05, 0.5) }}
-      whileHover={{ y: -4 }}
-      className="group bg-zinc-900/30 backdrop-blur-sm border border-zinc-800/50 rounded-2xl overflow-hidden hover:border-zinc-700/50 hover:bg-zinc-900/40 transition-all cursor-pointer"
+      transition={{ delay: Math.min(0.1 + index * 0.04, 0.4), duration: 0.35 }}
+      whileHover={{ y: -3 }}
+      className="group bg-zinc-900/30 border border-zinc-800/50 rounded-2xl overflow-hidden hover:border-zinc-700/60 hover:bg-zinc-900/50 transition-all cursor-pointer"
       onClick={handleClick}
     >
-      <div className="flex flex-col md:flex-row">
-        <div className="md:w-72 h-48 md:h-auto overflow-hidden bg-zinc-900/50 relative">
+      <div className="flex flex-col sm:flex-row">
+        {/* Thumbnail */}
+        <div className={`sm:w-64 md:w-72 h-44 sm:h-auto overflow-hidden relative shrink-0 ${!info.image ? typeFallbackBg[item.type] : ""}`}>
           {info.image ? (
-            <motion.img
+            <img
               src={info.image}
               alt={info.title}
-              className="w-full h-full object-cover"
-              whileHover={{ scale: 1.05 }}
-              transition={{ duration: 0.6 }}
+              className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500"
               onError={(e) => {
+                e.currentTarget.parentElement!.className = `sm:w-64 md:w-72 h-44 sm:h-auto overflow-hidden relative shrink-0 ${typeFallbackBg[item.type]}`;
                 e.currentTarget.style.display = "none";
               }}
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-600">
-              <span className="text-4xl font-light">
-                {item.type === "News"
-                  ? "📰"
-                  : item.type === "Reddit"
-                    ? "💬"
-                    : "🎬"}
-              </span>
+            <div className="w-full h-full flex items-center justify-center">
+              <span className="text-4xl opacity-40">{typeFallbackIcon[item.type]}</span>
             </div>
           )}
-          {/* YouTube duration overlay */}
+          {/* YouTube duration */}
           {isYoutubeContent(item.content) && item.content.duration && (
-            <span className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-black/80 rounded text-xs text-white font-medium">
+            <span className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-black/75 rounded-md text-[11px] text-white font-medium backdrop-blur-sm">
               {formatDuration(item.content.duration)}
             </span>
           )}
         </div>
-        <div className="flex-1 p-6">
-          <div className="flex items-center gap-2 mb-3 flex-wrap">
-            <span className="text-xs px-2 py-1 bg-zinc-800/50 rounded-full text-gray-400 font-light">
-              {item.topic?.name || item.type}
+
+        {/* Content */}
+        <div className="flex-1 p-5 flex flex-col gap-3 min-w-0">
+          {/* Meta row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full border ${typeStyle.bg} ${typeStyle.border} ${typeStyle.color}`}>
+              {typeStyle.label}
             </span>
-            <span className="text-xs px-2 py-1 bg-zinc-800/30 rounded-full text-gray-500 font-light">
-              {item.type}
-            </span>
+            {item.topic && (
+              <span className="text-[11px] px-2 py-0.5 bg-zinc-800/50 rounded-full text-zinc-400 font-medium">
+                {item.topic.name}
+              </span>
+            )}
             {item.enriched?.hasFullContent && (
-              <span className="text-xs px-2 py-1 bg-emerald-900/30 border border-emerald-800/30 rounded-full text-emerald-400 font-light flex items-center gap-1">
-                <BookOpen className="w-3 h-3" />
+              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-400 font-medium">
+                <BookOpen className="w-2.5 h-2.5" />
                 Full article
               </span>
             )}
-            <span className="text-xs text-gray-600 font-light">{info.source}</span>
-            <span className="text-xs text-gray-700">&middot;</span>
-            <span className="text-xs text-gray-600 font-light">{info.time}</span>
-            {showSavedAt && item.savedAt && (
-              <>
-                <span className="text-xs text-gray-700">&middot;</span>
-                <span className="text-xs text-gray-600 font-light">
-                  Saved {formatRelativeTime(item.savedAt)}
-                </span>
-              </>
-            )}
+            <span className="text-[11px] text-zinc-600 ml-auto">{info.time}</span>
           </div>
-          <h3 className="text-xl font-light mb-3 group-hover:text-gray-300 transition-colors line-clamp-2">
+
+          {/* Title */}
+          <h3 className="text-[15px] font-medium leading-snug text-zinc-100 group-hover:text-white transition-colors line-clamp-2">
             {info.title}
           </h3>
-          {/* Show summary if available */}
+
+          {/* Summary */}
           {item.enriched?.summary && (
-            <p className="text-sm text-gray-500 font-light mb-4 line-clamp-2">
+            <p className="text-[13px] text-zinc-500 leading-relaxed line-clamp-2 -mt-1">
               {item.enriched.summary}
             </p>
           )}
-          {/* YouTube metadata row */}
+
+          {/* YouTube stats */}
           {isYoutubeContent(item.content) && (
-            <div className="flex items-center gap-3 mb-4 text-xs text-gray-500">
+            <div className="flex items-center gap-3 text-[12px] text-zinc-500">
               <span className="flex items-center gap-1">
-                <Eye className="w-3.5 h-3.5" />
+                <Eye className="w-3 h-3" />
                 {formatCompactNumber(item.content.viewCount)}
               </span>
               <span className="flex items-center gap-1">
-                <ThumbsUp className="w-3.5 h-3.5" />
+                <ThumbsUp className="w-3 h-3" />
                 {formatCompactNumber(item.content.likeCount)}
               </span>
               {item.content.duration && (
                 <span className="flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5" />
+                  <Clock className="w-3 h-3" />
                   {formatDuration(item.content.duration)}
                 </span>
               )}
             </div>
           )}
-          <div className="flex items-center gap-4">
+
+          {/* Reddit stats */}
+          {isRedditContent(item.content) && (
+            <div className="flex items-center gap-3 text-[12px] text-zinc-500">
+              <span className="flex items-center gap-1">
+                <ArrowUpRight className="w-3 h-3" />
+                {formatCompactNumber(item.content.score)}
+              </span>
+              <span className="flex items-center gap-1">
+                <MessageSquare className="w-3 h-3" />
+                {formatCompactNumber(item.content.numComments)}
+              </span>
+            </div>
+          )}
+
+          {/* Footer row */}
+          <div className="flex items-center justify-between mt-auto pt-1">
+            <span className="text-[12px] text-zinc-600 truncate">{info.source}</span>
+            {showSavedAt && item.savedAt && (
+              <span className="text-[11px] text-zinc-700 shrink-0 ml-2">
+                Saved {formatRelativeTime(item.savedAt)}
+              </span>
+            )}
             <button
               type="button"
-              className={`text-sm transition-colors flex items-center gap-1 font-light ${
+              className={`shrink-0 flex items-center gap-1.5 text-[12px] transition-colors px-2.5 py-1 rounded-lg ml-2 ${
                 isSaved
-                  ? "text-yellow-400 hover:text-yellow-300"
-                  : "text-gray-500 hover:text-white"
+                  ? "text-amber-400 hover:text-amber-300 bg-amber-500/10"
+                  : "text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/60"
               }`}
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleSave(item.id);
               }}
             >
-              <Bookmark className={`w-4 h-4 ${isSaved ? "fill-current" : ""}`} />
-              {isSaved ? "Saved" : "Save"}
+              <Bookmark className={`w-3.5 h-3.5 ${isSaved ? "fill-current" : ""}`} />
+              <span className="font-medium">{isSaved ? "Saved" : "Save"}</span>
             </button>
           </div>
         </div>

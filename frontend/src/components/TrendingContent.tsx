@@ -9,10 +9,11 @@ import {
   trendingErrorAtom,
   setTimeRangeAtom,
 } from "../store/trendingAtom";
-import { getTrending, type TimeRange } from "../api/trending";
+import { getTrending, type TimeRange, type TrendingTopic } from "../api/trending";
 import FeedCard from "./FeedCard";
 import FeedCardSkeleton from "./FeedCardSkeleton";
 import { useToggleSave } from "@/hooks/useToggleSave";
+import { useState } from "react";
 
 const timeRangeOptions: { value: TimeRange; label: string }[] = [
   { value: "24h", label: "24 Hours" },
@@ -22,6 +23,7 @@ const timeRangeOptions: { value: TimeRange; label: string }[] = [
 
 export const TrendingContent = () => {
   const [items, setItems] = useAtom(trendingItemsAtom);
+  const [topics, setTopics] = useState<TrendingTopic[]>([]);
   const [filters] = useAtom(trendingFiltersAtom);
   const [loading, setLoading] = useAtom(trendingLoadingAtom);
   const [error, setError] = useAtom(trendingErrorAtom);
@@ -38,8 +40,10 @@ export const TrendingContent = () => {
         subTopicId: filters.subTopicId,
         type: filters.type,
         limit: 20,
+        topicLimit: 8,
       });
       setItems(response.items);
+      setTopics(response.trendingTopics ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch trending");
     } finally {
@@ -83,6 +87,24 @@ export const TrendingContent = () => {
           ))}
         </div>
       </motion.div>
+
+      {topics.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="flex flex-wrap items-center gap-2 mb-6"
+        >
+          {topics.map((topic) => (
+            <span
+              key={topic.id}
+              className="px-3 py-1 rounded-full text-xs font-light bg-zinc-900/40 border border-zinc-800/60 text-gray-300"
+            >
+              {topic.name}
+            </span>
+          ))}
+        </motion.div>
+      )}
 
       {/* Content */}
       <div className="space-y-6">

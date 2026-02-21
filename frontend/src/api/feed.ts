@@ -72,7 +72,7 @@ export interface FeedItem {
   fetchedAt: string;
   topic: TopicInfo | null;
   subTopic: TopicInfo | null;
-  content: NewsContent | RedditContent | YoutubeContent;
+  content: NewsContent | RedditContent | YoutubeContent | null;
   enriched?: EnrichedInfo;
   isSaved?: boolean;
   savedAt?: string;
@@ -101,21 +101,21 @@ export const getFeed = async (params: FeedParams = {}): Promise<FeedResponse> =>
  * Type guard to check if content is NewsContent
  */
 export const isNewsContent = (content: FeedItem["content"]): content is NewsContent => {
-  return "url" in content && "sourceName" in content;
+  return content !== null && typeof content === "object" && "url" in content && "sourceName" in content;
 };
 
 /**
  * Type guard to check if content is RedditContent
  */
 export const isRedditContent = (content: FeedItem["content"]): content is RedditContent => {
-  return "subreddit" in content && "score" in content;
+  return content !== null && typeof content === "object" && "subreddit" in content && "score" in content;
 };
 
 /**
  * Type guard to check if content is YoutubeContent
  */
 export const isYoutubeContent = (content: FeedItem["content"]): content is YoutubeContent => {
-  return "videoId" in content && "channelTitle" in content;
+  return content !== null && typeof content === "object" && "videoId" in content && "channelTitle" in content;
 };
 
 /**

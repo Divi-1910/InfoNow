@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     scraper_min_content_chars: int = 100
     scraper_user_agent: str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     scraper_extractor_order: str = "trafilatura,heuristic"
+    scraper_blocked_domains: str = "consent.yahoo.com"
+    scraper_blocked_path_keywords: str = "collectconsent,privacy,consent,login,signin"
     batch_size: int = 10
 
     # Outbox publisher settings

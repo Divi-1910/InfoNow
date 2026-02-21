@@ -22,6 +22,7 @@ model User {
   userSubTopics UserSubTopic[]
   refreshTokens RefreshToken[]
   savedItems    SavedItem[]
+  assistantThreads AssistantThread[]
 }
 
 model RefreshToken {
@@ -281,4 +282,41 @@ model OutboxEvent {
 
   @@index([processed, createdAt]) // For efficient polling: WHERE processed=false ORDER BY createdAt
   @@index([aggregateId])          // For looking up events by data point
+}
+
+enum AssistantMessageRole {
+  user
+  assistant
+  tool
+  system
+}
+
+model AssistantThread {
+  id            String             @id
+  userId        Int
+  title         String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  lastMessageAt DateTime           @default(now())
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages      AssistantMessage[]
+
+  @@index([userId, updatedAt])
+  @@index([userId, lastMessageAt])
+}
+
+model AssistantMessage {
+  id           String               @id @default(uuid())
+  threadId     String
+  role         AssistantMessageRole
+  content      String               @db.Text
+  citations    Json?
+  toolCalls    Json?
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+  createdAt    DateTime             @default(now())
+  thread       AssistantThread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
 }

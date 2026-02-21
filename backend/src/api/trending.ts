@@ -7,6 +7,20 @@ import { logger } from "../utils/logger.js";
 import type { DataType, Prisma } from "@prisma/client";
 
 const trendingRouter = Router();
+type TimeRange = "24h" | "7d" | "30d";
+
+interface RankedItem {
+  dataPoint: any;
+  score: number;
+}
+
+interface TrendingTopic {
+  id: number;
+  name: string;
+  slug: string;
+  count: number;
+  score: number;
+}
 
 /**
  * Optional auth middleware - same as in feed.ts
@@ -44,6 +58,7 @@ const optionalAuthMiddleware = (
  * - type: 'News' | 'Reddit' | 'Youtube' - filter by source type
  * - limit: number - items per page (default: 20, max: 50)
  * - timeRange: '24h' | '7d' | '30d' (default: 24h)
+ * - topicLimit: number - top trending topics to return (default: 6, max: 20)
  */
 trendingRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Response) => {
   try {
@@ -53,13 +68,20 @@ trendingRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Re
       type,
       limit = "20",
       timeRange = "24h",
+      topicLimit = "6",
     } = req.query;
 
     const limitNum = Math.min(Math.max(parseInt(limit as string) || 20, 1), 50);
+    const topicLimitNum = Math.min(
+      Math.max(parseInt(topicLimit as string) || 6, 1),
+      20
+    );
 
     // Calculate time cutoff based on timeRange
     const now = new Date();
     let timeCutoff: Date;
+    const selectedTimeRange: TimeRange =
+      timeRange === "7d" || timeRange === "30d" ? timeRange : "24h";
     switch (timeRange) {
       case "7d":
         timeCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -70,6 +92,13 @@ trendingRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Re
       default: // 24h
         timeCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     }
+
+    const halfLifeHoursByRange: Record<TimeRange, number> = {
+      "24h": 12,
+      "7d": 48,
+      "30d": 168,
+    };
+    const halfLifeHours = halfLifeHoursByRange[selectedTimeRange];
 
     // Build base where clause
     const baseWhere: Prisma.DataPointWhereInput = {
@@ -89,6 +118,8 @@ trendingRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Re
               topic: { select: { id: true, name: true, slug: true } },
               subTopic: { select: { id: true, name: true, slug: true } },
               rawReddit: true,
+              enrichedNews: { select: { summary: true } },
+              enrichedYoutube: { select: { summary: true } },
             },
             orderBy: { rawReddit: { score: "desc" } },
             take: limitNum,
@@ -103,6 +134,8 @@ trendingRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Re
               topic: { select: { id: true, name: true, slug: true } },
               subTopic: { select: { id: true, name: true, slug: true } },
               rawYoutube: true,
+              enrichedNews: { select: { summary: true } },
+              enrichedYoutube: { select: { summary: true } },
             },
             orderBy: { rawYoutube: { viewCount: "desc" } },
             take: limitNum,
@@ -118,6 +151,7 @@ trendingRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Re
               subTopic: { select: { id: true, name: true, slug: true } },
               rawNews: true,
               enrichedNews: { select: { summary: true } },
+              enrichedYoutube: { select: { summary: true } },
             },
             orderBy: { fetchedAt: "desc" },
             take: limitNum,
@@ -125,35 +159,89 @@ trendingRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Re
         : [],
     ]);
 
-    // Calculate trending scores and combine
-    interface TrendingItem {
-      dataPoint: any;
-      trendingScore: number;
+    const rank = (dp: any): number => {
+      const ageHours = Math.max(
+        0,
+        (Date.now() - new Date(dp.fetchedAt).getTime()) / (1000 * 60 * 60)
+      );
+      const recencyWeight = Math.exp(-ageHours / halfLifeHours);
+      const hasSummary = Boolean(dp.enrichedNews?.summary || dp.enrichedYoutube?.summary);
+
+      if (dp.type === "Reddit" && dp.rawReddit) {
+        const base =
+          1.4 * Math.log1p(Number(dp.rawReddit.score || 0)) +
+          1.8 * Math.log1p(Number(dp.rawReddit.numComments || 0)) +
+          (hasSummary ? 0.75 : 0);
+        return base * recencyWeight + 0.2;
+      }
+      if (dp.type === "Youtube" && dp.rawYoutube) {
+        const base =
+          1.1 * Math.log1p(Number(dp.rawYoutube.viewCount || 0)) +
+          1.6 * Math.log1p(Number(dp.rawYoutube.likeCount || 0)) +
+          (hasSummary ? 1.1 : 0);
+        return base * recencyWeight + 0.25;
+      }
+      if (dp.type === "News" && dp.rawNews) {
+        const summaryLen = Number(dp.enrichedNews?.summary?.length || 0);
+        const base =
+          2.6 +
+          (hasSummary ? 1.2 : 0) +
+          Math.min(summaryLen / 500, 1.4);
+        return base * recencyWeight + 0.3;
+      }
+      return 0;
+    };
+
+    const rankedItems: RankedItem[] = [...redditPosts, ...youtubePosts, ...newsPosts]
+      .map((dp) => ({ dataPoint: dp, score: rank(dp) }))
+      .sort((a, b) => b.score - a.score);
+
+    // Diversify source ordering to avoid long streaks of a single type.
+    const diversified: RankedItem[] = [];
+    const pool = [...rankedItems];
+    while (pool.length > 0 && diversified.length < limitNum) {
+      const lastType = diversified.length
+        ? diversified[diversified.length - 1].dataPoint.type
+        : null;
+      const prevType =
+        diversified.length > 1
+          ? diversified[diversified.length - 2].dataPoint.type
+          : null;
+      const avoidType = lastType && prevType && lastType === prevType ? lastType : null;
+      let nextIndex = 0;
+      if (avoidType) {
+        const candidateIndex = pool.findIndex((p) => p.dataPoint.type !== avoidType);
+        if (candidateIndex !== -1) {
+          nextIndex = candidateIndex;
+        }
+      }
+      diversified.push(pool.splice(nextIndex, 1)[0]);
     }
 
-    const allItems: TrendingItem[] = [
-      ...redditPosts.map((dp) => ({
-        dataPoint: dp,
-        trendingScore: (dp.rawReddit?.score || 0) + (dp.rawReddit?.numComments || 0) * 2,
-      })),
-      ...youtubePosts.map((dp) => ({
-        dataPoint: dp,
-        trendingScore:
-          Number(dp.rawYoutube?.viewCount || 0) / 1000 +
-          Number(dp.rawYoutube?.likeCount || 0),
-      })),
-      ...newsPosts.map((dp) => ({
-        dataPoint: dp,
-        // News: enriched articles get bonus score, plus recency factor
-        trendingScore:
-          (dp.enrichedNews ? 1000 : 0) +
-          new Date(dp.fetchedAt).getTime() / 100000000,
-      })),
-    ];
+    const topItems = diversified;
 
-    // Sort by trending score and take top items
-    allItems.sort((a, b) => b.trendingScore - a.trendingScore);
-    const topItems = allItems.slice(0, limitNum);
+    // Build trending topics from ranked candidates.
+    const topicAgg = new Map<number, TrendingTopic>();
+    for (const ranked of rankedItems) {
+      const topic = ranked.dataPoint.topic;
+      if (!topic?.id) continue;
+      const existing = topicAgg.get(topic.id);
+      if (existing) {
+        existing.count += 1;
+        existing.score += ranked.score;
+      } else {
+        topicAgg.set(topic.id, {
+          id: topic.id,
+          name: topic.name,
+          slug: topic.slug,
+          count: 1,
+          score: ranked.score,
+        });
+      }
+    }
+    const trendingTopics = [...topicAgg.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topicLimitNum);
 
     // Get saved IDs if user is authenticated
     let savedIds: Set<string> = new Set();
@@ -225,11 +313,12 @@ trendingRouter.get("/", optionalAuthMiddleware, async (req: AuthRequest, res: Re
 
     return res.status(200).json({
       items: feedItems,
+      trendingTopics,
       pagination: {
         nextCursor: null, // Trending doesn't support cursor pagination
         hasMore: false,
       },
-      timeRange,
+      timeRange: selectedTimeRange,
     });
   } catch (error) {
     logger.error("Trending fetch error:", error);

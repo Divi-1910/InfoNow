@@ -264,16 +264,25 @@ async function main() {
   for (const topic of topics) {
     const { subtopics, ...topicData } = topic;
 
-    const createdTopic = await prisma.topic.create({
-      data: {
-        ...topicData,
-        subTopics: {
-          create: subtopics,
-        },
-      },
+    // Upsert topic by slug so the seed is safe to run multiple times
+    const upsertedTopic = await prisma.topic.upsert({
+      where: { slug: topicData.slug },
+      create: topicData,
+      update: {},
     });
 
-    console.log(`Created topic: ${createdTopic.name} with ${subtopics.length} subtopics`);
+    // Upsert each subtopic individually — handles duplicate slugs across topics
+    let created = 0;
+    for (const subtopic of subtopics) {
+      const result = await prisma.subTopic.upsert({
+        where: { slug: subtopic.slug },
+        create: { ...subtopic, topicId: upsertedTopic.id },
+        update: {},
+      });
+      if (result.topicId === upsertedTopic.id) created++;
+    }
+
+    console.log(`Upserted topic: ${upsertedTopic.name} (${created}/${subtopics.length} subtopics linked)`);
   }
 
   console.log("Seed completed!");
