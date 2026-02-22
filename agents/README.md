@@ -1,15 +1,31 @@
-# Infiya Agents Service
+# Infiya Agent Service
 
-FastAPI + LangGraph service for assistant workflows.
+FastAPI + LangGraph service for the InfoNow assistant.
 
-## Endpoints
+## What It Handles
 
-- `GET /health` - service health
-- `POST /threads` - create a persistent conversation thread id
-- `POST /query` - non-streaming response
-- `POST /stream` - SSE stream (`text/event-stream`)
+- Creates conversation threads
+- Runs query workflow with tool-calling
+- Streams assistant output over SSE
+- Persists memory via Postgres checkpointer
 
-## Run
+## Tools Wired
+
+- `hybrid_os_search`
+- `keyword_os_search`
+- `vector_os_search` (current fallback strategy)
+- `search_web` (Tavily, optional)
+- `get_full_content`
+- `get_trending_content`
+
+## Prerequisites
+
+- Python 3.11+
+- PostgreSQL
+- OpenSearch
+- OpenAI API key
+
+## Setup
 
 ```bash
 cd agents
@@ -17,37 +33,40 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+```
+
+## Important Environment Values
+
+```env
+AGENT_HOST=0.0.0.0
+AGENT_PORT=8090
+AGENT_OPENAI_API_KEY=...
+AGENT_MODEL=gpt-4o-mini
+AGENT_ENABLE_WEB_SEARCH=false
+TAVILY_API_KEY=
+
+DATABASE_URL=postgresql://...
+OPENSEARCH_URL=http://localhost:9200
+BACKEND_BASE_URL=http://localhost:3000
+```
+
+## Run
+
+```bash
+cd agents
+source .venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8090 --reload
 ```
 
-## Current Workflow Shape
+## Endpoints
 
-The graph follows:
+- `GET /health`
+- `POST /threads`
+- `POST /query`
+- `POST /stream` (`text/event-stream`)
 
-`LLM Node -> Tools Node -> LLM Node` (capped loops)
+## Memory Model
 
-Tools currently wired:
-
-- `hybrid_os_search`
-- `keyword_os_search`
-- `vector_os_search`
-- `search_web`
-- `get_full_content`
-- `get_trending_content`
-
-`search_web` is gated by `AGENT_ENABLE_WEB_SEARCH`.
-When enabled, it uses Tavily (`TAVILY_API_KEY` required).
-
-## Memory
-
-- Conversation memory is persisted via LangGraph Postgres checkpointer.
-- Create a thread once using `POST /threads`.
-- Pass the returned `thread_id` as `conversation_id` in `/query` and `/stream`.
-
-## Model Provider
-
-This service is configured for OpenAI chat models via:
-
-- `AGENT_OPENAI_API_KEY`
-- `AGENT_MODEL` (default `gpt-4o-mini`)
-- optional `AGENT_OPENAI_BASE_URL`
+- Create a thread via `POST /threads`
+- Reuse returned `thread_id` as `conversation_id` in `/query` and `/stream`
+- Conversation state is checkpointed in Postgres

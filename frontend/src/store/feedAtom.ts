@@ -46,7 +46,7 @@ export const feedModeAtom = atom<"personalized" | "browse">((get) => {
 });
 
 // Action atom to reset feed (used when filters change)
-export const resetFeedAtom = atom(null, (get, set) => {
+export const resetFeedAtom = atom(null, (_get, set) => {
   set(feedItemsAtom, []);
   set(feedCursorAtom, null);
   set(feedHasMoreAtom, true);

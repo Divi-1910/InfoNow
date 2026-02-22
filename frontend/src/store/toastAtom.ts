@@ -21,6 +21,6 @@ export const addToastAtom = atom(
   }
 );
 
-export const removeToastAtom = atom(null, (get, set, id: string) => {
+export const removeToastAtom = atom(null, (_get, set, id: string) => {
   set(toastsAtom, (prev) => prev.filter((t) => t.id !== id));
 });

@@ -11,29 +11,42 @@ import { useState, useEffect } from "react";
 import { getUserPreferences, updateUserProfile } from "../api/user";
 import PreferencesModal from "../components/PreferencesModal";
 
+type PreferenceItem = {
+  id: number;
+  name: string;
+};
+
+type UserPreferencesResponse = {
+  topics: PreferenceItem[];
+  subtopics: PreferenceItem[];
+};
+
 const ProfilePage = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [user, setUser] = useAtom(userAtom);
   const [name, setName] = useState(user?.name || "");
-  const [email, setEmail] = useState(user?.email || "");
-  const [selectedTopicIds, setSelectedTopicIds] = useAtom(selectedTopicIdsAtom);
-  const [selectedSubTopicIds, setSelectedSubTopicIds] = useAtom(
+  const [email] = useState(user?.email || "");
+  const [, setSelectedTopicIds] = useAtom(selectedTopicIdsAtom);
+  const [, setSelectedSubTopicIds] = useAtom(
     selectedSubTopicIdsAtom
   );
-  const [userTopics, setUserTopics] = useState<any[]>([]);
-  const [userSubTopics, setUserSubTopics] = useState<any[]>([]);
+  const [userTopics, setUserTopics] = useState<PreferenceItem[]>([]);
+  const [userSubTopics, setUserSubTopics] = useState<PreferenceItem[]>([]);
   const [loading, setLoading] = useState(false);
 
   const isPreferencesOpen = searchParams.get("modal") === "preferences";
 
+  const refreshUserPreferences = async () => {
+    const data = (await getUserPreferences()) as UserPreferencesResponse;
+    setUserTopics(data.topics);
+    setUserSubTopics(data.subtopics);
+    setSelectedTopicIds(data.topics.map((t) => t.id));
+    setSelectedSubTopicIds(data.subtopics.map((st) => st.id));
+  };
+
   useEffect(() => {
-    getUserPreferences().then((data) => {
-      setUserTopics(data.topics);
-      setUserSubTopics(data.subtopics);
-      setSelectedTopicIds(data.topics.map((t: any) => t.id));
-      setSelectedSubTopicIds(data.subtopics.map((st: any) => st.id));
-    });
+    void refreshUserPreferences();
   }, []);
 
   const handleSave = async () => {
@@ -226,10 +239,7 @@ const ProfilePage = () => {
         isOpen={isPreferencesOpen}
         onClose={() => {
           setSearchParams({});
-          getUserPreferences().then((data) => {
-            setUserTopics(data.topics);
-            setUserSubTopics(data.subtopics);
-          });
+          void refreshUserPreferences();
         }}
       />
     </div>

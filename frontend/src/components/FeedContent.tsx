@@ -10,7 +10,6 @@ import {
   feedLoadingAtom,
   feedLoadingMoreAtom,
   feedErrorAtom,
-  updateFiltersAtom,
 } from "@/store/feedAtom";
 import { activeTabAtom } from "@/store/tabAtom";
 import FeedCard from "@/components/FeedCard";
@@ -29,7 +28,6 @@ export const FeedContent = () => {
   const [loading, setLoading] = useAtom(feedLoadingAtom);
   const [loadingMore, setLoadingMore] = useAtom(feedLoadingMoreAtom);
   const [error, setError] = useAtom(feedErrorAtom);
-  const [, updateFilters] = useAtom(updateFiltersAtom);
   const [activeTab] = useAtom(activeTabAtom);
 
   const { toggleSave, savedIds } = useToggleSave();

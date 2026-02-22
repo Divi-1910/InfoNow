@@ -2,7 +2,7 @@ import { atom } from "jotai";
 import type { FeedItem, FeedFilters } from "../api/feed";
 
 // Set of saved item IDs for quick O(1) lookup
-export const savedIdsAtom = atom<Set<string>>(new Set());
+export const savedIdsAtom = atom<Set<string>>(new Set<string>());
 
 // Saved items feed state (mirrors feed atom structure)
 export const savedItemsAtom = atom<FeedItem[]>([]);

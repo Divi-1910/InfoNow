@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Sparkles, TrendingUp, ArrowUpRight } from "lucide-react";
+import { TrendingUp, ArrowUpRight } from "lucide-react";
 import { useAtom } from "jotai";
 import { getTrending } from "@/api/trending";
 import { feedItemsAtom } from "@/store/feedAtom";

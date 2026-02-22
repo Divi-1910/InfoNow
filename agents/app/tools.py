@@ -17,6 +17,11 @@ _TAVILY_CLIENT: Any | None = None
 _TAVILY_INIT_ERROR: str | None = None
 logger = logging.getLogger(__name__)
 
+BACKEND_HEADERS = {
+    "X-Origin": "Info",
+    "Accept": "application/json",
+}
+
 
 def _clean_api_key(value: str | None) -> str | None:
     if not value:
@@ -234,7 +239,7 @@ def get_full_content(data_point_id: str) -> dict[str, Any]:
     url = f"{settings.backend_base_url}/api/feed/{data_point_id}"
     try:
         with httpx.Client(timeout=10.0) as client:
-            resp = client.get(url)
+            resp = client.get(url, headers=BACKEND_HEADERS)
             resp.raise_for_status()
             return resp.json()
     except Exception as exc:
@@ -255,6 +260,7 @@ def get_trending_content(
             resp = client.get(
                 f"{settings.backend_base_url}/api/trending",
                 params={"timeRange": time_range, "limit": limit, "topicLimit": topic_limit},
+                headers=BACKEND_HEADERS,
             )
             resp.raise_for_status()
             return resp.json()
